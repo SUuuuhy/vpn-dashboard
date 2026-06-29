@@ -1,0 +1,41 @@
+source_name,url,category,notes,priority,enabled
+NordVPN Blog,https://nordvpn.com/blog/,竞品动态,NordVPN官方博客：产品更新/功能发布/促销活动/安全公告,1,true
+NordVPN News,https://nordvpn.com/news/,竞品动态,NordVPN新闻室：官方公告/媒体稿,1,true
+ExpressVPN Blog,https://www.expressvpn.com/blog/,竞品动态,ExpressVPN官方博客：产品更新/功能发布/安全研究,1,true
+Surfshark Blog,https://surfshark.com/blog,竞品动态,Surfshark官方博客：产品功能/安全报告/促销,1,true
+ProtonVPN Blog,https://protonvpn.com/blog/,竞品动态,Proton官方博客：隐私/安全/产品更新,1,true
+Mullvad Blog,https://mullvad.net/en/blog,竞品动态,Mullvad官方博客：隐私政策/审计/产品更新,1,true
+Windscribe Blog,https://blog.windscribe.com/,竞品动态,Windscribe官方博客：产品/功能/公司动态,2,true
+IPVanish Blog,https://www.ipvanish.com/blog/,竐品动态,IPVanish官方博客：产品/功能,2,true
+PIA Blog,https://www.privateinternetaccess.com/blog/,竞品动态,PIA官方博客：隐私/产品,2,true
+CyberGhost Blog,https://www.cyberghostvpn.com/privacyhub/,竞品动态,CyberGhost官方博客：隐私/产品,2,true
+NordVPN Twitter,https://nitter.net/NordVPN/rss,社交媒体,NordVPN官方X/Twitter：产品公告/促销/用户互动,1,true
+ExpressVPN Twitter,https://nitter.net/expressvpn/rss,社交媒体,ExpressVPN官方X/Twitter：产品/促销/公告,1,true
+Surfshark Twitter,https://nitter.net/Surfshark/rss,社交媒体,Surfshark官方X/Twitter：产品/促销/公告,1,true
+ProtonVPN Twitter,https://nitter.net/ProtonVPN/rss,社交媒体,ProtonVPN官方X/Twitter：隐私/产品/公告,1,true
+Mullvad Twitter,https://nitter.net/mullvadvpn/rss,社交媒体,Mullvad官方X/Twitter：隐私/产品/公告,2,true
+r/VPN,https://www.reddit.com/r/VPN/,reddit讨论,综合VPN讨论：用户抱怨/推荐/流媒体解锁/隐私/价格比较,1,true
+r/nordvpn,https://www.reddit.com/r/nordvpn/,reddit讨论,NordVPN用户讨论：故障/评价/节点问题,1,true
+r/ProtonVPN,https://www.reddit.com/r/ProtonVPN/,reddit讨论,ProtonVPN用户讨论：隐私/功能/问题,1,true
+r/Express_VPN,https://www.reddit.com/r/Express_VPN/,reddit讨论,ExpressVPN用户讨论：速度/稳定性/评价,1,true
+r/Windscribe,https://www.reddit.com/r/Windscribe/,reddit讨论,Windscribe用户讨论：功能/问题/反馈,2,true
+r/mullvadvpn,https://www.reddit.com/r/mullvadvpn/,reddit讨论,Mullvad用户讨论：隐私/匿名支付/审计,2,true
+r/VPN_Question,https://www.reddit.com/r/VPN_Question/,reddit讨论,VPN购买决策：选择困难/性价比/具体需求咨询,1,true
+r/privacy,https://www.reddit.com/r/privacy/,reddit讨论,隐私讨论中与VPN相关的内容：数据泄露/监控/隐私工具,2,true
+GOV.UK Digital,https://www.gov.uk/search/news-and-communications?keywords=VPN,政策风险,英国政府VPN相关政策/法规/公告,1,true
+Ofcom News,https://www.ofcom.org.uk/news-centre,政策风险,英国通信监管机构：互联网监管/VPN相关法规,1,true
+ICO News,https://ico.org.uk/about-the-ico/media-centre/,政策风险,英国信息专员办公室：数据保护/隐私法规,1,true
+EU Digital Policy,https://digital-strategy.ec.europa.eu/en/news,政策风险,欧盟数字政策：数据法/隐私法/AI法案,1,true
+FTC News,https://www.ftc.gov/news-events/news,政策风险,美国联邦贸易委员会：数据隐私/科技监管,2,true
+CISA Advisories,https://www.cisa.gov/news-events/cybersecurity-advisories,政策风险,美国网络安全机构：VPN漏洞/安全公告,1,true
+TechRadar VPN,https://www.techradar.com/vpn,第三方网站,TechRadar VPN评测/新闻：竞品比较/行业动态,1,true
+Tom's Guide VPN,https://www.tomsguide.com/vpn,第三方网站,Tom's Guide VPN评测：竞品排名/最新评测,1,true
+Comparitech VPN,https://www.comparitech.com/blog/vpn-privacy/,第三方网站,Comparitech VPN专题：隐私研究/泄露事件/竞品对比,1,true
+RestorePrivacy,https://restoreprivacy.com/blog/,第三方网站,RestorePrivacy：深度VPN评测/隐私新闻,1,true
+BleepingComputer VPN,https://www.bleepingcomputer.com/,第三方网站,BleepingComputer：VPN安全漏洞/数据泄露事件,1,true
+The Verge Privacy,https://www.theverge.com/privacy,第三方网站,The Verge隐私板块：科技隐私/VPN相关报道,2,true
+Wired Security,https://www.wired.com/category/security/,第三方网站,Wired安全板块：隐私/VPN/监控报道,2,true
+Trustpilot NordVPN,https://www.trustpilot.com/review/nordvpn.com,第三方网站,Trustpilot用户评价：NordVPN真实用户体验/投诉,1,true
+Trustpilot ExpressVPN,https://www.trustpilot.com/review/expressvpn.com,第三方网站,Trustpilot用户评价：ExpressVPN真实用户体验/投诉,1,true
+Trustpilot Surfshark,https://www.trustpilot.com/review/surfshark.com,第三方网站,Trustpilot用户评价：Surfshark真实用户体验/投诉,2,true
+Google Trends VPN,https://trends.google.com/trends/explore?q=vpn&geo=US,第三方网站,Google搜索趋势：VPN关键词热度/地区差异,2,true

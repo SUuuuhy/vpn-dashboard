@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VPN 行业情报日报</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface2: #273549;
+  --border: #334155;
+  --text: #e2e8f0;
+  --text2: #94a3b8;
+  --text3: #64748b;
+  --accent: #38bdf8;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       background: var(--bg); color: var(--text); line-height: 1.6; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+
+/* Header */
+.panel-header {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.panel-title { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.panel-subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 16px; }
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.meta-item { background: var(--surface2); border-radius: 8px; padding: 10px 14px; }
+.meta-label { font-size: 0.7rem; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; }
+.meta-value { font-size: 0.9rem; font-weight: 600; color: var(--text); margin-top: 2px; }
+
+/* Overview chips */
+.overview { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.overview-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1.5px solid; border-radius: 999px;
+  padding: 6px 14px; cursor: pointer; transition: background .15s;
+}
+.overview-chip:hover { background: var(--surface2); }
+.chip-icon { font-size: 1rem; }
+.chip-label { font-size: 0.82rem; color: var(--text2); }
+.chip-count { font-size: 0.75rem; font-weight: 700; color: #fff;
+              border-radius: 999px; padding: 1px 7px; }
+
+/* Category sections */
+.category-section { margin-bottom: 32px; }
+.category-header {
+  display: flex; align-items: center; gap: 10px;
+  border-left: 4px solid; padding-left: 12px; margin-bottom: 14px;
+}
+.cat-icon { font-size: 1.2rem; }
+.cat-title { font-size: 1.05rem; font-weight: 700; flex: 1; }
+.cat-count { font-size: 0.75rem; font-weight: 700; color: #fff;
+             border-radius: 999px; padding: 2px 10px; }
+.cards-container { display: flex; flex-direction: column; gap: 12px; }
+.empty-section { color: var(--text3); font-size: 0.85rem;
+                  padding: 16px; background: var(--surface); border-radius: 8px; }
+
+/* Info cards */
+.info-card {
+  background: var(--surface); border-radius: 10px;
+  border-left: 3px solid; padding: 16px;
+  transition: background .15s;
+}
+.info-card:hover { background: var(--surface2); }
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.card-title { font-size: 0.95rem; font-weight: 600; color: var(--text); flex: 1; }
+.card-meta { display: flex; gap: 6px; flex-shrink: 0; align-items: center; flex-wrap: wrap; }
+.time-badge {
+  font-size: 0.72rem; background: var(--surface2); color: var(--text2);
+  border-radius: 4px; padding: 2px 7px;
+}
+.multi-source-badge {
+  font-size: 0.72rem; background: #1e3a5f; color: #7dd3fc;
+  border-radius: 4px; padding: 2px 7px;
+}
+.card-summary { font-size: 0.83rem; color: var(--text2); margin-bottom: 8px; }
+.card-time { font-size: 0.75rem; color: var(--text3); margin-bottom: 8px; }
+
+/* Sources details */
+.sources-details summary {
+  font-size: 0.8rem; color: var(--text3); cursor: pointer;
+  padding: 4px 0; list-style: none;
+}
+.sources-details summary::-webkit-details-marker { display:none; }
+.sources-details[open] summary { color: var(--text2); }
+.sources-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.source-item {
+  background: var(--bg); border-radius: 6px; padding: 8px 10px;
+  font-size: 0.78rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+}
+.source-name { font-weight: 600; color: var(--accent); }
+.source-type { color: var(--text3); background: var(--surface2); border-radius: 3px; padding: 0 5px; }
+.source-title { color: var(--text2); flex: 1; min-width: 100px; }
+.source-time { color: var(--text3); white-space: nowrap; }
+.source-link { word-break: break-all; }
+
+/* Collapsed sections */
+.collapsed-section {
+  background: var(--surface); border-radius: 8px;
+  border: 1px solid var(--border); margin-bottom: 10px;
+}
+.collapsed-section > summary {
+  padding: 12px 16px; cursor: pointer; font-size: 0.85rem;
+  color: var(--text2); list-style: none; user-select: none;
+}
+.collapsed-section > summary::-webkit-details-marker { display:none; }
+.collapsed-section[open] > summary { color: var(--text); border-bottom: 1px solid var(--border); }
+.collapsed-content { padding: 12px 16px; }
+.fail-item { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+.fail-item:last-child { border-bottom: none; }
+.error-text { color: #f87171; font-size: 0.78rem; }
+.filtered-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--text2); }
+.filtered-item:last-child { border-bottom: none; }
+.note { font-size: 0.78rem; color: var(--text3); margin-top: 8px; }
+
+/* Collapsed zone header */
+.collapsed-zone { margin-top: 32px; }
+.collapsed-zone-title { font-size: 0.8rem; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+
+@media (max-width: 600px) {
+  .meta-grid { grid-template-columns: 1fr 1fr; }
+  .card-header { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- HEADER -->
+<div class="panel-header">
+  <div class="panel-title">📡 VPN 行业情报日报</div>
+  <div class="panel-subtitle">Daily VPN Industry Intelligence Panel</div>
+  <div class="meta-grid">
+    <div class="meta-item"><div class="meta-label">更新时间</div><div class="meta-value">2026-06-29 18:22 SGT</div></div>
+    <div class="meta-item"><div class="meta-label">时区</div><div class="meta-value">SGT (UTC+8)</div></div>
+    <div class="meta-item"><div class="meta-label">时效窗口</div><div class="meta-value">最近 48h（+12h 时区宽限）</div></div>
+    <div class="meta-item"><div class="meta-label">抓取来源</div><div class="meta-value">40 个（成功 0）</div></div>
+    <div class="meta-item"><div class="meta-label">原始抓取</div><div class="meta-value">0 条</div></div>
+    <div class="meta-item"><div class="meta-label">进入面板</div><div class="meta-value">0 条</div></div>
+    <div class="meta-item"><div class="meta-label">已过滤</div><div class="meta-value">时效外 0 + 时间不明 0</div></div>
+  </div>
+</div>
+
+<!-- OVERVIEW -->
+<div class="overview">
+<div class="overview-chip" style="border-color:#2563eb"><span class="chip-icon">🏢</span><span class="chip-label">竞品动态</span><span class="chip-count" style="background:#2563eb">0</span></div>
+<div class="overview-chip" style="border-color:#7c3aed"><span class="chip-icon">📣</span><span class="chip-label">社交媒体</span><span class="chip-count" style="background:#7c3aed">0</span></div>
+<div class="overview-chip" style="border-color:#ea580c"><span class="chip-icon">💬</span><span class="chip-label">reddit讨论</span><span class="chip-count" style="background:#ea580c">0</span></div>
+<div class="overview-chip" style="border-color:#dc2626"><span class="chip-icon">⚖️</span><span class="chip-label">政策风险</span><span class="chip-count" style="background:#dc2626">0</span></div>
+<div class="overview-chip" style="border-color:#059669"><span class="chip-icon">🌐</span><span class="chip-label">第三方网站</span><span class="chip-count" style="background:#059669">0</span></div>
+
+</div>
+
+<!-- MAIN SECTIONS -->
+<section class="category-section" id="cat-7aa05484">
+  <div class="category-header" style="border-left-color:#2563eb">
+    <span class="cat-icon">🏢</span>
+    <h2 class="cat-title">竞品动态</h2>
+    <span class="cat-count" style="background:#2563eb">0 条</span>
+  </div>
+  <div class="cards-container"><div class="empty-section">暂无本时效窗口内的有效信息</div></div>
+</section>
+<section class="category-section" id="cat-58ba1baa">
+  <div class="category-header" style="border-left-color:#7c3aed">
+    <span class="cat-icon">📣</span>
+    <h2 class="cat-title">社交媒体</h2>
+    <span class="cat-count" style="background:#7c3aed">0 条</span>
+  </div>
+  <div class="cards-container"><div class="empty-section">暂无本时效窗口内的有效信息</div></div>
+</section>
+<section class="category-section" id="cat-a35e9ec8">
+  <div class="category-header" style="border-left-color:#ea580c">
+    <span class="cat-icon">💬</span>
+    <h2 class="cat-title">reddit讨论</h2>
+    <span class="cat-count" style="background:#ea580c">0 条</span>
+  </div>
+  <div class="cards-container"><div class="empty-section">暂无本时效窗口内的有效信息</div></div>
+</section>
+<section class="category-section" id="cat-c39bf376">
+  <div class="category-header" style="border-left-color:#dc2626">
+    <span class="cat-icon">⚖️</span>
+    <h2 class="cat-title">政策风险</h2>
+    <span class="cat-count" style="background:#dc2626">0 条</span>
+  </div>
+  <div class="cards-container"><div class="empty-section">暂无本时效窗口内的有效信息</div></div>
+</section>
+<section class="category-section" id="cat-bc9beb3b">
+  <div class="category-header" style="border-left-color:#059669">
+    <span class="cat-icon">🌐</span>
+    <h2 class="cat-title">第三方网站</h2>
+    <span class="cat-count" style="background:#059669">0 条</span>
+  </div>
+  <div class="cards-container"><div class="empty-section">暂无本时效窗口内的有效信息</div></div>
+</section>
+
+
+<!-- COLLAPSED ZONE -->
+<div class="collapsed-zone">
+<div class="collapsed-zone-title">▼ 折叠区（非主要信息）</div>
+
+
+
+
+</div>
+
+</div><!-- /container -->
+</body>
+</html>

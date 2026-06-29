@@ -1,0 +1,130 @@
+name: Daily VPN Dashboard Update
+
+on:
+  schedule:
+    # Run daily at 08:00 SGT = 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      skip_network:
+        description: '跳过网络抓取（仅生成结构）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      lookback_hours:
+        description: '时效窗口小时数（默认48）'
+        required: false
+        default: '48'
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Validate required files ───────────────
+      - name: Validate required files
+        run: |
+          echo "=== Checking required files ==="
+          MISSING=0
+
+          for f in requirements.txt scripts/update_dashboard.py config/sources.csv; do
+            if [ ! -f "$f" ]; then
+              echo "❌ MISSING: $f"
+              MISSING=1
+            else
+              echo "✅ Found: $f"
+            fi
+          done
+
+          if [ $MISSING -eq 1 ]; then
+            echo ""
+            echo "ERROR: Required files are missing."
+            echo "Please ensure the following files exist in the repository root:"
+            echo "  - requirements.txt"
+            echo "  - scripts/update_dashboard.py"
+            echo "  - config/sources.csv"
+            exit 1
+          fi
+          echo "All required files present ✅"
+
+      # ── 3. Set up Python ─────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 4. Install dependencies ──────────────────
+      - name: Install dependencies
+        run: |
+          echo "=== Installing Python dependencies ==="
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "Dependencies installed ✅"
+
+      # ── 5. Generate dashboard ────────────────────
+      - name: Generate dashboard
+        env:
+          REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT:    ${{ secrets.REDDIT_USER_AGENT }}
+          SKIP_NETWORK:         ${{ github.event.inputs.skip_network || 'false' }}
+          LOOKBACK_HOURS:       ${{ github.event.inputs.lookback_hours || '48' }}
+          TIMEZONE_GRACE_HOURS: '12'
+        run: |
+          echo "=== Generating dashboard ==="
+          echo "SKIP_NETWORK=${SKIP_NETWORK}"
+          echo "LOOKBACK_HOURS=${LOOKBACK_HOURS}"
+          python scripts/update_dashboard.py \
+            --lookback-hours "${LOOKBACK_HOURS}" \
+            $([ "${SKIP_NETWORK}" = "true" ] && echo "--skip-network" || echo "")
+          echo "Dashboard generated ✅"
+
+      # ── 6. Verify output ─────────────────────────
+      - name: Verify output files
+        run: |
+          echo "=== Verifying output ==="
+          if [ ! -f "docs/index.html" ]; then
+            echo "❌ docs/index.html not found"
+            exit 1
+          fi
+          echo "✅ docs/index.html exists ($(wc -c < docs/index.html) bytes)"
+          if [ -f "docs/data/latest.json" ]; then
+            echo "✅ docs/data/latest.json exists"
+          fi
+          ls -la docs/
+
+      # ── 7. Setup Pages ───────────────────────────
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      # ── 8. Upload artifact ───────────────────────
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      # ── 9. Deploy to Pages ───────────────────────
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
