@@ -300,6 +300,11 @@ class Article:
         self.source_type  = source_type
         self.raw_time     = raw_time
         self.id           = slug(f"{url}{title}")
+        # AI-generated one-sentence Chinese summary of what this specific
+        # source actually says — None until enrich_articles_with_ai_summary()
+        # fills it in (only runs when ANTHROPIC_API_KEY is configured).
+        # Falls back to the rule-based describe_text_zh() topic tag when None.
+        self.summary_zh   = None
 
     def to_dict(self):
         return {
@@ -307,6 +312,7 @@ class Article:
             "title": self.title,
             "url": self.url,
             "summary": self.summary,
+            "summary_zh": self.summary_zh,
             "published_sgt": self.published_dt.strftime("%Y-%m-%d %H:%M SGT") if self.published_dt else None,
             "published_iso": self.published_dt.isoformat() if self.published_dt else None,
             "source_name": self.source_name,
@@ -1013,6 +1019,89 @@ def extract_keywords(groups, top_n=8):
 # CATEGORY HIGHLIGHTS — AI synthesis with rule-based fallback
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# PER-SOURCE AI SUMMARIZATION
+# Gives each individual source link a real one-sentence Chinese summary of
+# what that specific post/article actually says — not just a topic tag.
+# Batched (one API call per ~25 articles) to keep cost/latency reasonable.
+# Falls back silently to describe_text_zh() when no API key, or on failure.
+# ─────────────────────────────────────────────
+
+AI_SUMMARY_BATCH_SIZE = 25
+
+def enrich_articles_with_ai_summary(cat_groups):
+    """
+    Collects every unique Article across all category groups and, if
+    ANTHROPIC_API_KEY is configured, asks Claude to write a one-sentence
+    Chinese summary for each (batched). Sets article.summary_zh in place.
+    Safe to call with no API key — it's then simply a no-op and every
+    render falls back to the rule-based describe_text_zh() topic tag.
+    """
+    if not ANTHROPIC_API_KEY:
+        return
+
+    seen_ids = set()
+    all_articles = []
+    for groups in cat_groups.values():
+        for g in groups:
+            for art in g["sources"]:
+                if art.id not in seen_ids:
+                    seen_ids.add(art.id)
+                    all_articles.append(art)
+
+    if not all_articles:
+        return
+
+    log.info(f"AI per-source summarization: {len(all_articles)} unique articles to summarize")
+
+    for i in range(0, len(all_articles), AI_SUMMARY_BATCH_SIZE):
+        batch = all_articles[i : i + AI_SUMMARY_BATCH_SIZE]
+        payload = [
+            {"id": art.id, "title": art.title[:150], "summary": (art.summary or "")[:250]}
+            for art in batch
+        ]
+        prompt = (
+            "以下是VPN行业情报抓取到的一批原始信息条目（JSON数组，每条有 id/title/summary）：\n\n"
+            f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "请给每一条写一句中文摘要，概括这条原帖/文章实际在说什么（不超过30字），"
+            "要体现具体内容（比如涉及的品牌、问题或事件），不要只写泛泛的分类标签。"
+            "客观陈述，不要评价、不要给建议。\n\n"
+            "严格按以下JSON数组格式输出，不要任何多余文字、不要markdown代码块标记：\n"
+            '[{"id":"原id值","summary_zh":"一句话中文摘要"}, ...]\n'
+            "数组长度必须与输入条目数量完全一致，顺序无需对应，靠id匹配。"
+        )
+        try:
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=45,
+            )
+            r.raise_for_status()
+            text = "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+            text = text.strip()
+            if text.startswith("```"):
+                text = re.sub(r"^```(json)?\s*", "", text)
+                text = re.sub(r"\s*```$", "", text)
+            results = json.loads(text)
+            by_id = {item["id"]: item.get("summary_zh", "") for item in results if "id" in item}
+            for art in batch:
+                if art.id in by_id and by_id[art.id]:
+                    art.summary_zh = by_id[art.id]
+            log.info(f"  Batch {i // AI_SUMMARY_BATCH_SIZE + 1}: summarized {len(by_id)}/{len(batch)} articles")
+        except Exception as e:
+            log.warning(f"  AI per-source summary batch failed ({i}-{i+len(batch)}): {e} "
+                        f"— these articles fall back to rule-based topic tags")
+        time.sleep(0.3)
+
 def generate_ai_highlights(cat, groups):
     """Call Anthropic API to synthesize what's actually being discussed.
     Returns list[str] (bullets) or None on any failure (caller falls back)."""
@@ -1392,6 +1481,11 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
         groups.sort(key=importance_score, reverse=True)
         cat_groups[cat] = groups
 
+    # Per-source AI summarization — gives each individual source link a real
+    # Chinese one-liner of what it says, not just a topic tag. No-op without
+    # ANTHROPIC_API_KEY (falls back to describe_text_zh() at render time).
+    enrich_articles_with_ai_summary(cat_groups)
+
     # Cross-category competitor watch matrix ("竞品监控矩阵")
     competitor_matrix = build_competitor_matrix(cat_groups, own_brand)
     log.info(f"Competitor matrix: {len(competitor_matrix)} active brands")
@@ -1517,12 +1611,17 @@ def render_source_tag(art: Article):
     link_html = f'<a href="{art.url}" target="_blank" rel="noopener">{art.url[:60]}{"…" if len(art.url)>60 else ""}</a>' if art.url else "无链接"
     time_str  = fmt_dt(art.published_dt)
     age_str   = age_label(art.published_dt)
-    gist_zh   = describe_text_zh(art.title, art.summary)
+    if art.summary_zh:
+        gist_zh = art.summary_zh
+        gist_badge = '<span class="gist-method-badge" title="AI生成的中文摘要">🤖</span>'
+    else:
+        gist_zh = describe_text_zh(art.title, art.summary)
+        gist_badge = ""
     return f"""<div class="source-item">
   <div class="source-item-main">
     <span class="source-name">{art.source_name}</span>
     <span class="source-type">{art.source_type}</span>
-    <span class="source-gist">{gist_zh}</span>
+    <span class="source-gist">{gist_zh}{gist_badge}</span>
     <span class="source-time">{time_str}（{age_str}）</span>
   </div>
   <div class="source-item-detail">
@@ -2174,6 +2273,7 @@ a:hover {{ text-decoration: underline; }}
 .source-name {{ font-weight: 700; color: var(--accent); }}
 .source-type {{ color: var(--text3); background: var(--surface2); border-radius: 4px; padding: 0 6px; }}
 .source-gist {{ color: var(--text); font-weight: 600; flex: 1; min-width: 100px; }}
+.gist-method-badge {{ font-size: 0.65rem; opacity: 0.6; margin-left: 2px; }}
 .source-time {{ color: var(--text3); white-space: nowrap; }}
 .source-item-detail {{
   display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;

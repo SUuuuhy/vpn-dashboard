@@ -132,6 +132,7 @@ def build_buckets(days, own_brand):
                 src_count = g.get("source_count", 1)
                 sources   = g.get("sources", [])
                 url       = sources[0].get("url", "") if sources else ""
+                summary_zh_ai = sources[0].get("summary_zh") if sources else None
 
                 topics = match_feature_topics(text)
                 if not topics:
@@ -140,6 +141,7 @@ def build_buckets(days, own_brand):
                 item = {
                     "date": date_str, "title": title, "summary": summary, "category": cat,
                     "brands": brands, "url": url, "source_count": src_count,
+                    "summary_zh": summary_zh_ai,
                 }
 
                 is_own        = bool(own_brand) and own_brand in brands
@@ -217,13 +219,18 @@ def render_topic_card(entry, color):
         brand_str = "、".join(it["brands"]) if it["brands"] else "—"
         link = (f'<a href="{it["url"]}" target="_blank" rel="noopener">{it["url"][:55]}'
                 f'{"…" if len(it["url"]) > 55 else ""}</a>') if it["url"] else "无链接"
-        gist_zh = ud.describe_text_zh(it["title"], it.get("summary", ""), it["brands"])
+        if it.get("summary_zh"):
+            gist_zh = it["summary_zh"]
+            gist_badge = '<span class="gist-method-badge" title="AI生成的中文摘要">🤖</span>'
+        else:
+            gist_zh = ud.describe_text_zh(it["title"], it.get("summary", ""), it["brands"])
+            gist_badge = ""
         items_html += f"""<div class="eg-item">
   <div class="eg-item-main">
     <span class="eg-date">{it['date']}</span>
     <span class="eg-brand">{brand_str}</span>
     <span class="eg-cat">{it['category']}</span>
-    <span class="eg-gist">{gist_zh}</span>
+    <span class="eg-gist">{gist_zh}{gist_badge}</span>
   </div>
   <div class="eg-item-detail">
     <span class="eg-title-original">原标题：{it['title'][:80]}</span>
