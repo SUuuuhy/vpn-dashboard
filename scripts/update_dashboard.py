@@ -44,6 +44,22 @@ REQUEST_HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
 }
 
+# Nitter is structurally unreliable as of 2026: X/Twitter blocked Nitter's
+# guest-account mechanism in 2023-24, and as of mid-2026 most surviving
+# public instances have RSS specifically disabled even when the instance
+# itself is "up". This list is tried as best-effort fallback (rotating
+# through alternates if nitter.net itself fails) but social media monitoring
+# should not be assumed reliable — see REDDIT_提升指南.md / TROUBLESHOOTING
+# for the recommended YouTube-RSS-based alternative.
+NITTER_INSTANCES = [
+    "nitter.net",
+    "xcancel.com",
+    "nitter.poast.org",
+    "nitter.privacyredirect.com",
+    "lightbrd.com",
+    "nitter.tiekoetter.com",
+]
+
 # Known RSS feed URLs for sites that block root URL scraping
 KNOWN_RSS_URLS = {
     "nordvpn.com":           "https://nordvpn.com/blog/feed/",
@@ -71,6 +87,43 @@ KNOWN_RSS_URLS = {
 
 CATEGORY_ORDER = ["竞品动态", "社交媒体", "reddit讨论", "政策风险", "第三方网站"]
 
+# Brand registry for the cross-category "竞品监控矩阵" — maps a canonical
+# brand name to substrings to match (case-insensitive) in title+summary text.
+BRAND_REGISTRY = {
+    "NordVPN":      ["nordvpn"],
+    "ExpressVPN":   ["expressvpn"],
+    "Surfshark":    ["surfshark"],
+    "ProtonVPN":    ["protonvpn", "proton vpn"],
+    "Mullvad":      ["mullvad"],
+    "Windscribe":   ["windscribe"],
+    "PIA":          ["private internet access", "piavpn"],
+    "CyberGhost":   ["cyberghost"],
+    "IPVanish":     ["ipvanish"],
+    "X-VPN":        ["x-vpn", "xvpn"],
+    "AirVPN":       ["airvpn"],
+}
+
+# Rule-based sentiment/severity signal words — used when no AI key is
+# configured, and as a sanity baseline even when it is. Chinese + English
+# because sources are mostly English but manual_inputs.csv may be Chinese.
+RISK_SIGNAL_WORDS = [
+    "breach", "leak", "leaked", "outage", "down", "lawsuit", "sue", "sued", "fine", "fined",
+    "banned", "ban", "vulnerability", "vulnerable", "exploit", "hack", "hacked",
+    "complaint", "complaints", "refund", "scam", "fraud", "unstable", "disconnect",
+    "disconnected", "fail", "failed", "failure", "block", "blocked", "expose", "exposed",
+    "investigation", "fined", "penalty", "violation", "illegal", "data breach",
+    "断线", "漏洞", "诉讼", "处罚", "投诉", "退款", "欺诈", "封禁", "不稳定", "泄露",
+    "攻击", "下线", "故障", "罚款", "调查", "违规", "曝光", "扣款", "限流", "崩溃",
+]
+POSITIVE_SIGNAL_WORDS = [
+    "launch", "launches", "launched", "award", "awarded", "partnership", "upgrade",
+    "upgraded", "audit passed", "passed audit", "new feature", "milestone", "improve",
+    "improved", "improvement", "growth", "expand", "expansion", "celebrate", "winner",
+    "recommend", "recommended", "best vpn", "top pick", "successfully",
+    "获奖", "审计通过", "新功能", "上线", "合作", "升级", "突破", "好评", "推荐",
+    "增长", "扩张", "成功", "通过审计", "表彰", "认证",
+]
+
 DIRS = {
     "docs":    Path("docs"),
     "data":    Path("docs/data"),
@@ -85,6 +138,22 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("vpn_dashboard")
+
+def read_own_brand():
+    """
+    Reads config/own_brand.txt — a single brand name (must match a key in
+    BRAND_REGISTRY) marking "我方" vs "竞品". Lines starting with # are
+    comments. Returns "" if unset/missing — in that case the dashboard falls
+    back to brand-agnostic positive/negative framing (no 我方/竞品 distinction).
+    """
+    path = DIRS["config"] / "own_brand.txt"
+    if not path.exists():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return ""
 
 # ─────────────────────────────────────────────
 # HELPERS
@@ -556,6 +625,37 @@ def detect_rss_url(url):
             pass
     return None
 
+def fetch_nitter_with_fallback(source_name, url, category):
+    """
+    Try the configured Nitter URL first, then rotate through alternate
+    public instances using the same path/handle. Returns the first
+    successful result, or the last (failed) result with all attempted
+    instances recorded in .error for diagnostics.
+    """
+    parsed = urlparse(url)
+    path_and_query = parsed.path + (("?" + parsed.query) if parsed.query else "")
+
+    tried = []
+    last_result = None
+    for instance in NITTER_INSTANCES:
+        candidate_url = f"https://{instance}{path_and_query}"
+        result = fetch_rss(source_name, candidate_url, category)
+        tried.append(f"{instance}: {'OK' if result.success and result.articles else (result.error or '空结果')}")
+        if result.success and result.articles:
+            result.note = f"成功实例: {instance}"
+            return result
+        last_result = result
+        time.sleep(0.5)
+
+    last_result.error = " | ".join(tried)
+    last_result.note = (
+        "所有 Nitter 实例均失败 — 这是已知的结构性问题（2023-24年起X已封锁Nitter的"
+        "访客账号机制，2026年多数实例RSS功能被关闭），不是配置错误。"
+        "建议改用 YouTube 官方RSS监控品牌动态，详见 REDDIT_提升指南.md / "
+        "TROUBLESHOOTING_CN.md 的「社交媒体」章节。"
+    )
+    return last_result
+
 def fetch_source(row):
     source_name = row.get("source_name", "Unknown")
     url         = row.get("url", "").strip()
@@ -570,9 +670,10 @@ def fetch_source(row):
     if "reddit.com/r/" in url:
         return fetch_reddit(source_name, url, category)
 
-    # Nitter RSS (Twitter)
-    if "nitter.net" in url:
-        return fetch_rss(source_name, url, category)
+    # Nitter RSS (Twitter) — try multiple instances, since nitter.net alone
+    # is structurally unreliable in 2026 (see NITTER_INSTANCES comment)
+    if any(inst in url for inst in NITTER_INSTANCES) or "nitter." in url:
+        return fetch_nitter_with_fallback(source_name, url, category)
 
     # Known RSS/Atom feeds (direct URL)
     rss_hints = ["/feed", "/rss", ".rss", ".xml", "/atom", "feeds.feedburner"]
@@ -690,6 +791,152 @@ def importance_score(group):
     return src_count * 4 + recency_bonus
 
 # ─────────────────────────────────────────────
+# BRAND DETECTION & SIGNAL CLASSIFICATION
+# ─────────────────────────────────────────────
+
+def detect_brands(text):
+    """Return list of canonical brand names mentioned in the given text."""
+    text_l = text.lower()
+    found = []
+    for brand, keywords in BRAND_REGISTRY.items():
+        if any(kw in text_l for kw in keywords):
+            found.append(brand)
+    return found
+
+def classify_signal(group):
+    """
+    Rule-based sentiment/severity tagging — always computed, no AI needed.
+    Returns: {"sentiment": "risk"|"positive"|"neutral", "severity": "high"|"medium"|"low"}
+    这是判断"这条消息意味着什么"的基础层；配置 ANTHROPIC_API_KEY 后，
+    执行摘要会用 AI 给出更精准的解读，但逐条标签始终走这套规则，保证稳定可控。
+    """
+    text = (group["title"] + " " + (group["summary"] or "")).lower()
+    risk_hits = sum(1 for w in RISK_SIGNAL_WORDS if w in text)
+    pos_hits  = sum(1 for w in POSITIVE_SIGNAL_WORDS if w in text)
+
+    if risk_hits > pos_hits and risk_hits > 0:
+        sentiment = "risk"
+    elif pos_hits > risk_hits and pos_hits > 0:
+        sentiment = "positive"
+    else:
+        sentiment = "neutral"
+
+    src_count = len(group["sources"])
+    if sentiment == "risk" and (src_count >= 3 or risk_hits >= 3):
+        severity = "high"
+    elif sentiment == "risk" and (src_count >= 2 or risk_hits >= 2):
+        severity = "medium"
+    elif sentiment == "risk":
+        severity = "low"
+    else:
+        severity = "low"
+
+    return {"sentiment": sentiment, "severity": severity}
+
+def tag_group(group, own_brand=""):
+    """Attach brands + signal classification + strategic stance onto a
+    merged group dict (in place). 'stance' answers the question this feature
+    was missing: is this event's sentiment about OUR brand, or about a
+    COMPETITOR (in which case their bad news is our potential opportunity,
+    not our risk)."""
+    text = group["title"] + " " + (group["summary"] or "")
+    group["brands"] = detect_brands(text)
+    group["signal"] = classify_signal(group)
+    group["stance"] = compute_stance(group["brands"], group["signal"]["sentiment"], own_brand)
+    return group
+
+STANCE_INFO = {
+    # (own_brand configured AND this group is about own_brand)
+    "self_risk":           {"icon": "🔴", "label": "我方风险",        "css": "sentiment-risk"},
+    "self_positive":       {"icon": "🟢", "label": "我方利好",        "css": "sentiment-positive"},
+    "self_neutral":        {"icon": "🟡", "label": "我方动态",        "css": "sentiment-neutral"},
+    # (own_brand configured AND this group is about a different, known brand)
+    "competitor_risk":     {"icon": "🎯", "label": "竞品负面·潜在机会", "css": "sentiment-opportunity"},
+    "competitor_positive": {"icon": "⚠️", "label": "竞品正面·值得关注", "css": "sentiment-watch"},
+    "competitor_neutral":  {"icon": "⚪", "label": "竞品动态",        "css": "sentiment-neutral"},
+    # (own_brand NOT configured — generic brand-self framing, no strategic spin)
+    "brand_negative":      {"icon": "⚠️", "label": "该品牌负面信号",   "css": "sentiment-risk"},
+    "brand_positive":      {"icon": "✅", "label": "该品牌正面信号",   "css": "sentiment-positive"},
+    "brand_neutral":       {"icon": "➖", "label": "常规动态",        "css": "sentiment-neutral"},
+    # (no brand detected at all — general industry/policy news, not brand-specific)
+    "general":             {"icon": "📰", "label": "行业信息",        "css": "sentiment-neutral"},
+}
+
+def compute_stance(brands, sentiment, own_brand):
+    """
+    The core fix: a competitor's bad news ≠ our risk. This function decides
+    which lens to apply based on whether 'own_brand' is configured and
+    whether this particular group is actually about our brand or a
+    competitor's.
+    """
+    if not own_brand:
+        # No self-brand configured — describe the brand's own situation
+        # without implying anything about "us" specifically.
+        if not brands:
+            return "general"
+        return {"risk": "brand_negative", "positive": "brand_positive", "neutral": "brand_neutral"}[sentiment]
+
+    if own_brand in brands:
+        return {"risk": "self_risk", "positive": "self_positive", "neutral": "self_neutral"}[sentiment]
+    elif brands:
+        return {"risk": "competitor_risk", "positive": "competitor_positive", "neutral": "competitor_neutral"}[sentiment]
+    else:
+        return "general"
+
+def build_competitor_matrix(cat_groups, own_brand=""):
+    """
+    Cross-category aggregation by brand — the "竞品监控矩阵". For each known
+    brand, scan every category's groups (not just 竞品动态) and roll up:
+    mention count, risk/positive counts (brand's own situation), and a
+    one-line latest item. Each row is also tagged is_own=True/False so the
+    UI can render "我方" rows distinctly from competitor rows, and the
+    risk/positive counts get a 对我方意义 interpretation attached.
+    """
+    matrix = {}
+    for brand in BRAND_REGISTRY:
+        matrix[brand] = {
+            "brand": brand,
+            "is_own": bool(own_brand) and brand == own_brand,
+            "mentions": 0,
+            "risk_count": 0,
+            "positive_count": 0,
+            "neutral_count": 0,
+            "top_item": None,
+            "top_score": -1,
+        }
+
+    for cat in CATEGORY_ORDER:
+        for g in cat_groups.get(cat, []):
+            for brand in g.get("brands", []):
+                m = matrix[brand]
+                m["mentions"] += 1
+                sentiment = g["signal"]["sentiment"]
+                if sentiment == "risk":
+                    m["risk_count"] += 1
+                elif sentiment == "positive":
+                    m["positive_count"] += 1
+                else:
+                    m["neutral_count"] += 1
+                score = importance_score(g)
+                if score > m["top_score"]:
+                    m["top_score"] = score
+                    m["top_item"] = {
+                        "title": g["title"], "category": cat,
+                        "sentiment": sentiment, "severity": g["signal"]["severity"],
+                        "stance": g.get("stance", "general"),
+                    }
+
+    # Only return brands that were actually mentioned today.
+    # Own brand always sorted first (regardless of risk count) since it's
+    # the row the team needs to see without hunting; competitors then
+    # sorted by risk_count (their negative news = our potential opportunity,
+    # so it's still the most "actionable" ordering even from our lens).
+    active = [m for m in matrix.values() if m["mentions"] > 0]
+    active.sort(key=lambda m: (not m["is_own"], -m["risk_count"], -m["mentions"]))
+    return active
+
+
+# ─────────────────────────────────────────────
 # KEYWORD EXTRACTION (rule-based fallback)
 # ─────────────────────────────────────────────
 
@@ -783,7 +1030,133 @@ def generate_category_highlights(cat, groups):
         return ai_result, "AI"
     return generate_rule_based_highlights(cat, groups), "规则"
 
+# ─────────────────────────────────────────────
+# EXECUTIVE BRIEF — 今日简报 (shareable, cross-category)
+# ─────────────────────────────────────────────
 
+def generate_ai_brief(cat_groups, competitor_matrix, own_brand=""):
+    """AI-written 3-5 sentence brief summarizing the most important
+    cross-category signals — meant to be copy-pasted to a team/manager.
+    Returns dict or None on failure."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        all_top = []
+        for cat in CATEGORY_ORDER:
+            for g in sorted(cat_groups.get(cat, []), key=importance_score, reverse=True)[:5]:
+                all_top.append({
+                    "category": cat,
+                    "title": g["title"][:100],
+                    "summary": (g["summary"] or "")[:150],
+                    "source_count": len(g["sources"]),
+                    "brands": g.get("brands", []),
+                    "sentiment": g.get("signal", {}).get("sentiment", "neutral"),
+                    "stance": g.get("stance", "general"),
+                })
+        brand_summary = [
+            {
+                "brand": m["brand"], "is_own": m.get("is_own", False),
+                "mentions": m["mentions"], "risk_count": m["risk_count"],
+                "positive_count": m["positive_count"],
+            }
+            for m in competitor_matrix
+        ]
+        own_brand_note = (
+            f"我方品牌是「{own_brand}」。关于我方品牌的负面信号才算「风险」，"
+            f"需要重点提示；其他品牌（竞品）的负面信号代表竞品出现问题，"
+            f"对我方而言是潜在机会而非风险，请用相应的措辞区分，不要把竞品的坏消息"
+            f"也描述成对我们的风险。"
+            if own_brand else
+            "未配置我方品牌，因此请只客观描述每个品牌自身的处境（正面/负面），"
+            "不要假设任何品牌的好坏消息对'我们'意味着什么。"
+        )
+        prompt = (
+            "以下是VPN行业情报面板今天抓取到的跨类别重点条目（JSON），以及按品牌汇总的提及/风险/利好次数：\n\n"
+            f"条目（stance字段含义：self_*=我方品牌相关，competitor_*=竞品相关，"
+            f"brand_*=未区分我方/竞品时的通用描述，general=无具体品牌）：\n"
+            f"{json.dumps(all_top, ensure_ascii=False)}\n\n"
+            f"品牌汇总：{json.dumps(brand_summary, ensure_ascii=False)}\n\n"
+            f"{own_brand_note}\n\n"
+            "请写一份给团队看的「今日简报」，用中文，3-5句话，要求：\n"
+            "1. 第一句直接给出我方今天的整体风险等级判断（平稳/需关注/有预警信号）及理由\n"
+            "2. 点出今天最值得关注的1-3件具体事情，并明确说清楚这是「我方需关注的风险」"
+            "还是「竞品的动态（无论好坏，都不是我方风险）」\n"
+            "3. 语气客观、简洁，像是给团队主管的简报，不要输出运营建议或下一步行动\n"
+            "直接输出简报正文，不要标题、不要编号、不要多余说明。"
+        )
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 350,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        text = "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+        text = text.strip()
+        return {"text": text, "method": "AI"} if text else None
+    except Exception as e:
+        log.warning(f"AI brief generation failed: {e}")
+        return None
+
+def generate_rule_based_brief(cat_groups, competitor_matrix, own_brand=""):
+    """No-AI fallback brief. Stance-aware: only OUR brand's risk counts as
+    risk; competitors' negative news is framed as opportunity, not danger."""
+    total_groups = sum(len(g) for g in cat_groups.values())
+
+    if own_brand:
+        own_row = next((m for m in competitor_matrix if m.get("is_own")), None)
+        own_risk = own_row["risk_count"] if own_row else 0
+        own_positive = own_row["positive_count"] if own_row else 0
+        competitor_rows = [m for m in competitor_matrix if not m.get("is_own") and m["risk_count"] > 0]
+
+        if own_risk == 0:
+            level = "🟢 平稳"
+            level_text = f"我方品牌「{own_brand}」今日未检测到风险信号。"
+        elif own_risk <= 2:
+            level = "🟡 需关注"
+            level_text = f"我方品牌「{own_brand}」今日检测到 {own_risk} 条风险信号，建议留意。"
+        else:
+            level = "🔴 有预警"
+            level_text = f"我方品牌「{own_brand}」今日检测到 {own_risk} 条风险信号，数量偏多，建议重点关注。"
+
+        lines = [f"{level}：{level_text}"]
+
+        if own_row and own_row.get("top_item") and own_risk > 0:
+            lines.append(f"· 我方代表事件：「{own_row['top_item']['title'][:40]}」")
+
+        if competitor_rows:
+            top3 = sorted(competitor_rows, key=lambda m: m["risk_count"], reverse=True)[:3]
+            names = "、".join(f"{m['brand']}({m['risk_count']}条)" for m in top3)
+            lines.append(f"· 竞品方面：{names} 出现负面信号，对我方可能是获客/对比机会，非我方风险。")
+
+        lines.append(f"共抓取 {total_groups} 条已合并事件，覆盖 {len(competitor_matrix)} 个品牌。")
+    else:
+        # Fallback when no own_brand configured — purely descriptive, no "risk to us" framing
+        total_negative = sum(m["risk_count"] for m in competitor_matrix)
+        lines = [f"📊 今日共识别到 {total_negative} 条品牌负面信号、"
+                 f"{sum(m['positive_count'] for m in competitor_matrix)} 条正面信号（均为该品牌自身视角，"
+                 f"未配置我方品牌，不做相对我方的风险/机会判断）。"]
+        if competitor_matrix:
+            top = competitor_matrix[0]
+            lines.append(f"· 今日提及最多的品牌：{top['brand']}（{top['mentions']} 次）")
+        lines.append(f"共抓取 {total_groups} 条已合并事件，覆盖 {len(competitor_matrix)} 个品牌。"
+                     f"配置 config/own_brand.txt 后可获得「对我方意义」的判断。")
+
+    return {"text": "\n".join(lines), "method": "规则"}
+
+def generate_executive_brief(cat_groups, competitor_matrix, own_brand=""):
+    ai_result = generate_ai_brief(cat_groups, competitor_matrix, own_brand)
+    if ai_result:
+        return ai_result
+    return generate_rule_based_brief(cat_groups, competitor_matrix, own_brand)
 
 def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWORK):
     run_start = now_sgt()
@@ -838,14 +1211,25 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
 
     log.info(f"In window: {len(in_window)} | No time: {len(no_time)} | Too old: {len(too_old)}")
 
+    # "我方" brand (optional) — distinguishes our risk from a competitor's
+    # bad news (which is our potential opportunity, not our risk).
+    own_brand = read_own_brand()
+    log.info(f"Own brand configured as: {own_brand or '(未配置)'}")
+
     # Group by category and deduplicate
     cat_groups = defaultdict(list)
     for cat in CATEGORY_ORDER:
         cat_articles = [a for a in in_window if a.category == cat]
         groups = deduplicate_and_merge(cat_articles)
+        for g in groups:
+            tag_group(g, own_brand)  # attaches g["brands"], g["signal"], g["stance"]
         # Sort by importance: multi-source-confirmed + fresher items surface first
         groups.sort(key=importance_score, reverse=True)
         cat_groups[cat] = groups
+
+    # Cross-category competitor watch matrix ("竞品监控矩阵")
+    competitor_matrix = build_competitor_matrix(cat_groups, own_brand)
+    log.info(f"Competitor matrix: {len(competitor_matrix)} active brands")
 
     # Generate per-category highlight summaries ("今日要点")
     cat_highlights = {}
@@ -854,6 +1238,9 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
         bullets, method = generate_category_highlights(cat, cat_groups[cat])
         cat_highlights[cat] = bullets
         cat_highlight_method[cat] = method
+
+    # Executive brief ("今日简报") — shareable cross-category summary
+    executive_brief = generate_executive_brief(cat_groups, competitor_matrix, own_brand)
 
     # Failed sources
     failed_sources = [fr for fr in fetch_results if not fr.success]
@@ -891,6 +1278,7 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
         "too_old": len(too_old),
         "category_counts": category_counts,
         "category_deltas": category_deltas,
+        "own_brand": own_brand,
     }
 
     return {
@@ -898,6 +1286,8 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
         "cat_groups": cat_groups,
         "cat_highlights": cat_highlights,
         "cat_highlight_method": cat_highlight_method,
+        "competitor_matrix": competitor_matrix,
+        "executive_brief": executive_brief,
         "failed_sources": failed_sources,
         "no_time_articles": no_time,
         "too_old_articles": too_old,
@@ -987,14 +1377,27 @@ def render_group_card(group, cat):
     else:
         signal_badge = ''
 
+    severity  = group.get("signal", {}).get("severity", "low")
+    stance    = group.get("stance", "general")
+    s_info    = STANCE_INFO.get(stance, STANCE_INFO["general"])
+    severity_suffix = ""
+    if stance in ("self_risk", "competitor_risk"):
+        severity_suffix = "·高" if severity == "high" else ("·中" if severity == "medium" else "")
+    sentiment_html = f'<span class="sentiment-badge {s_info["css"]}" title="{s_info["label"]}">{s_info["icon"]} {s_info["label"]}{severity_suffix}</span>'
+
+    brands = group.get("brands", [])
+    brand_html = "".join(f'<span class="brand-tag">{b}</span>' for b in brands)
+
     return f"""<div class="info-card" style="border-left-color:{color}">
   <div class="card-header">
     <h3 class="card-title">{group['title']}</h3>
     <div class="card-meta">
+      {sentiment_html}
       <span class="time-badge">{age}</span>
       {signal_badge}
     </div>
   </div>
+  {f'<div class="card-brands">{brand_html}</div>' if brand_html else ''}
   {f'<p class="card-summary">{group["summary"]}</p>' if group["summary"] else ''}
   <div class="card-time">🕐 {time_range}</div>
   <details class="sources-details">
@@ -1073,10 +1476,109 @@ def render_html(data, mode="index", current_date=""):
     cat_groups = data["cat_groups"]
     cat_highlights = data["cat_highlights"]
     cat_highlight_method = data["cat_highlight_method"]
+    competitor_matrix = data.get("competitor_matrix", [])
+    executive_brief   = data.get("executive_brief", {"text": "", "method": "规则"})
     failed    = data["failed_sources"]
     no_time   = data["no_time_articles"]
     too_old   = data["too_old_articles"]
     deltas    = stats.get("category_deltas", {})
+
+    # ── Executive brief box ("今日简报") — shareable, sits above everything ──
+    brief_method_tag = "🤖 AI简报" if executive_brief.get("method") == "AI" else "📊 规则简报"
+    brief_lines = executive_brief.get("text", "").split("\n")
+    brief_html_lines = "".join(f"<p>{ln}</p>" for ln in brief_lines if ln.strip())
+    executive_brief_html = f"""<div class="exec-brief">
+  <div class="exec-brief-header">
+    <span class="exec-brief-title">📋 今日简报（可直接转发团队）</span>
+    <div class="exec-brief-actions">
+      <span class="exec-brief-method">{brief_method_tag}</span>
+      <button class="copy-brief-btn" type="button" onclick="(function(btn){{
+        var text = document.getElementById('briefText').innerText;
+        navigator.clipboard.writeText(text).then(function(){{
+          var old = btn.textContent; btn.textContent = '已复制 ✓';
+          setTimeout(function(){{ btn.textContent = old; }}, 1500);
+        }});
+      }})(this)">📋 复制</button>
+    </div>
+  </div>
+  <div class="exec-brief-body" id="briefText">{brief_html_lines}</div>
+</div>"""
+
+    # ── Competitor watch matrix ("竞品监控矩阵") — cross-category by brand ──
+    own_brand_stats = stats.get("own_brand", "")
+    if competitor_matrix:
+        rows_html = ""
+        for m in competitor_matrix:
+            is_own = m.get("is_own", False)
+            if is_own:
+                # Dot reflects risk TO US
+                if m["risk_count"] >= 2:
+                    row_indicator = '<span class="matrix-dot dot-red"></span>'
+                elif m["risk_count"] == 1:
+                    row_indicator = '<span class="matrix-dot dot-yellow"></span>'
+                else:
+                    row_indicator = '<span class="matrix-dot dot-green"></span>'
+                type_badge = '<span class="matrix-type-badge type-own">⭐ 我方</span>'
+                if m["risk_count"] >= 2:
+                    meaning = "需重点关注"
+                elif m["risk_count"] == 1:
+                    meaning = "建议留意"
+                else:
+                    meaning = "暂无风险"
+            else:
+                # Dot reflects OPPORTUNITY size (their problem ≠ our danger)
+                if m["risk_count"] >= 2:
+                    row_indicator = '<span class="matrix-dot dot-opportunity"></span>'
+                elif m["positive_count"] >= 2:
+                    row_indicator = '<span class="matrix-dot dot-watch"></span>'
+                else:
+                    row_indicator = '<span class="matrix-dot dot-neutral-gray"></span>'
+                type_badge = '<span class="matrix-type-badge type-competitor">竞品</span>'
+                if not own_brand_stats:
+                    meaning = "—（未配置我方品牌）"
+                elif m["risk_count"] >= 2:
+                    meaning = "潜在机会"
+                elif m["positive_count"] >= 2:
+                    meaning = "竞品走强·留意"
+                else:
+                    meaning = "常规"
+
+            top = m.get("top_item") or {}
+            top_title = top.get("title", "—")[:50]
+            top_cat   = top.get("category", "")
+            row_class = "matrix-own-row" if is_own else ""
+            rows_html += f"""<tr class="{row_class}">
+  <td class="matrix-brand">{row_indicator}{m['brand']}{type_badge}</td>
+  <td class="matrix-num">{m['mentions']}</td>
+  <td class="matrix-num matrix-risk">{m['risk_count'] if m['risk_count'] else '—'}</td>
+  <td class="matrix-num matrix-positive">{m['positive_count'] if m['positive_count'] else '—'}</td>
+  <td class="matrix-meaning">{meaning}</td>
+  <td class="matrix-top">{top_title}<span class="matrix-top-cat">{top_cat}</span></td>
+</tr>"""
+        subtitle = (f"我方品牌：{own_brand_stats} · 其余为竞品，跨5个分类汇总"
+                    if own_brand_stats else
+                    "跨5个分类汇总（未配置我方品牌，见下方「对我方意义」列说明）")
+        competitor_matrix_html = f"""<div class="competitor-matrix">
+  <div class="matrix-header">
+    <span class="matrix-title">🎯 竞品监控矩阵</span>
+    <span class="matrix-subtitle">{subtitle}</span>
+  </div>
+  <div class="matrix-table-wrap">
+    <table class="matrix-table">
+      <thead><tr>
+        <th>品牌</th><th>提及次数</th><th>负面信号</th><th>正面信号</th><th>对我方意义</th><th>今日代表事件</th>
+      </tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+  </div>
+  <p class="matrix-footnote">💡 "负面/正面信号"指该品牌自身的处境；竞品的负面信号代表竞品出现问题，
+  对我方通常是机会而非风险——只有「我方」那一行的负面信号才代表需要我们关注的风险。</p>
+</div>"""
+    else:
+        competitor_matrix_html = """<div class="competitor-matrix">
+  <div class="matrix-header"><span class="matrix-title">🎯 竞品监控矩阵</span></div>
+  <div class="empty-section">本时效窗口内未识别到已知竞品品牌提及</div>
+</div>"""
 
     # Category overview chips (with day-over-day delta)
     overview_html = ""
@@ -1202,57 +1704,143 @@ def render_html(data, mode="index", current_date=""):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VPN 行业情报日报</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {{
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface2: #273549;
-  --border: #334155;
-  --text: #e2e8f0;
-  --text2: #94a3b8;
-  --text3: #64748b;
-  --accent: #38bdf8;
+  --bg: #F5F7FC;
+  --surface: #FFFFFF;
+  --surface2: #EEF1F9;
+  --border: #E3E7F2;
+  --text: #0B1220;
+  --text2: #4B5568;
+  --text3: #94A0B8;
+  --accent: #2F5DFF;
+  --accent2: #7C3AED;
+  --shadow-sm: 0 1px 2px rgba(15,23,42,0.05);
+  --shadow-md: 0 4px 16px rgba(15,23,42,0.07);
 }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+body {{ font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
        background: var(--bg); color: var(--text); line-height: 1.6; }}
 a {{ color: var(--accent); text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
-.container {{ max-width: 960px; margin: 0 auto; padding: 24px 16px; }}
+.container {{ max-width: 1440px; margin: 0 auto; padding: 24px 16px; }}
 
-/* Header */
+/* Header — gradient banner echoing X-VPN's hero treatment */
 .panel-header {{
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
+  background: linear-gradient(135deg, #2F5DFF 0%, #7C3AED 100%);
+  border-radius: 20px;
+  padding: 28px 26px;
   margin-bottom: 20px;
+  box-shadow: var(--shadow-md);
 }}
-.panel-title {{ font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 4px; }}
-.panel-subtitle {{ color: var(--text2); font-size: 0.85rem; margin-bottom: 16px; }}
+.panel-title {{ font-size: 1.55rem; font-weight: 800; color: #fff; margin-bottom: 4px; letter-spacing: -0.01em; }}
+.panel-subtitle {{ color: rgba(255,255,255,0.78); font-size: 0.85rem; margin-bottom: 18px; }}
 .meta-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }}
-.meta-item {{ background: var(--surface2); border-radius: 8px; padding: 10px 14px; }}
-.meta-label {{ font-size: 0.7rem; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; }}
-.meta-value {{ font-size: 0.9rem; font-weight: 600; color: var(--text); margin-top: 2px; }}
+.meta-item {{ background: rgba(255,255,255,0.14); border-radius: 12px; padding: 10px 14px; }}
+.meta-label {{ font-size: 0.7rem; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: .05em; }}
+.meta-value {{ font-size: 0.9rem; font-weight: 700; color: #fff; margin-top: 2px; }}
+
+/* Executive brief ("今日简报") — same gradient family, the "read this first" banner */
+.exec-brief {{
+  background: linear-gradient(135deg, #2F5DFF 0%, #7C3AED 100%);
+  border-radius: 18px; padding: 18px 20px; margin-bottom: 18px;
+  box-shadow: var(--shadow-md);
+}}
+.exec-brief-header {{ display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }}
+.exec-brief-title {{ font-size: 0.95rem; font-weight: 800; color: #fff; }}
+.exec-brief-actions {{ display: flex; align-items: center; gap: 8px; }}
+.exec-brief-method {{ font-size: 0.68rem; color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.16);
+                      border-radius: 6px; padding: 2px 8px; }}
+.copy-brief-btn {{
+  background: rgba(255,255,255,0.18); color: #fff; border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 999px; padding: 5px 14px; font-size: 0.75rem; cursor: pointer; font-weight: 600;
+}}
+.copy-brief-btn:hover {{ background: rgba(255,255,255,0.28); }}
+.exec-brief-body p {{ font-size: 0.88rem; color: rgba(255,255,255,0.95); line-height: 1.7; margin-bottom: 4px; }}
+.exec-brief-body p:last-child {{ margin-bottom: 0; }}
+
+/* Competitor watch matrix ("竞品监控矩阵") */
+.competitor-matrix {{
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 18px; padding: 18px 20px; margin-bottom: 22px;
+  box-shadow: var(--shadow-sm);
+}}
+.matrix-header {{ display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }}
+.matrix-title {{ font-size: 0.95rem; font-weight: 800; color: var(--text); }}
+.matrix-subtitle {{ font-size: 0.75rem; color: var(--text3); }}
+.matrix-table-wrap {{ overflow-x: auto; }}
+.matrix-table {{ width: 100%; border-collapse: collapse; font-size: 0.83rem; }}
+.matrix-table th {{
+  text-align: left; color: var(--text3); font-weight: 700; font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: .03em; padding: 8px 10px;
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}}
+.matrix-table td {{ padding: 10px 10px; border-bottom: 1px solid var(--border); }}
+.matrix-table tr:last-child td {{ border-bottom: none; }}
+.matrix-table tr:hover {{ background: var(--surface2); }}
+.matrix-brand {{ font-weight: 700; color: var(--text); white-space: nowrap; }}
+.matrix-num {{ text-align: center; color: var(--text2); font-weight: 700; }}
+.matrix-risk {{ color: #DC2626; }}
+.matrix-positive {{ color: #16A34A; }}
+.matrix-top {{ color: var(--text2); font-size: 0.8rem; max-width: 260px; }}
+.matrix-top-cat {{ display: block; font-size: 0.68rem; color: var(--text3); margin-top: 2px; }}
+.matrix-dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+              margin-right: 7px; vertical-align: middle; }}
+.dot-red {{ background: #EF4444; }}
+.dot-yellow {{ background: #F59E0B; }}
+.dot-green {{ background: #22C55E; }}
+.dot-opportunity {{ background: #06B6D4; }}
+.dot-watch {{ background: #F59E0B; }}
+.dot-neutral-gray {{ background: var(--text3); }}
+
+.matrix-own-row {{ background: rgba(47, 93, 255, 0.05); }}
+.matrix-type-badge {{
+  font-size: 0.65rem; font-weight: 700; border-radius: 6px; padding: 1px 7px;
+  margin-left: 6px; vertical-align: middle;
+}}
+.type-own {{ background: #EAF0FF; color: #2F5DFF; }}
+.type-competitor {{ background: var(--surface2); color: var(--text3); }}
+.matrix-meaning {{ color: var(--text2); font-size: 0.8rem; white-space: nowrap; }}
+.matrix-footnote {{ font-size: 0.72rem; color: var(--text3); margin-top: 12px;
+                    line-height: 1.6; padding-top: 10px; border-top: 1px solid var(--border); }}
+
+/* Sentiment badges on cards */
+.sentiment-badge {{ font-size: 0.7rem; font-weight: 700; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }}
+.sentiment-risk {{ background: #FEF2F2; color: #DC2626; }}
+.sentiment-positive {{ background: #F0FDF4; color: #16A34A; }}
+.sentiment-neutral {{ background: var(--surface2); color: var(--text3); }}
+.sentiment-opportunity {{ background: #ECFEFF; color: #0891B2; }}
+.sentiment-watch {{ background: #FFFBEB; color: #D97706; }}
+
+/* Brand tags on cards */
+.card-brands {{ display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }}
+.brand-tag {{
+  font-size: 0.7rem; background: var(--surface2); color: var(--accent);
+  border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; font-weight: 600;
+}}
 
 /* History date-filter nav */
 .history-nav {{
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 10px; padding: 10px 14px; margin-bottom: 20px;
+  border-radius: 14px; padding: 12px 16px; margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
 }}
-.history-label {{ font-size: 0.82rem; color: var(--text2); font-weight: 600; white-space: nowrap; }}
+.history-label {{ font-size: 0.82rem; color: var(--text2); font-weight: 700; white-space: nowrap; }}
 .history-select {{
   background: var(--bg); color: var(--text); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 10px; font-size: 0.82rem; flex: 1; min-width: 160px;
+  border-radius: 8px; padding: 7px 12px; font-size: 0.82rem; flex: 1; min-width: 160px;
   max-width: 320px;
 }}
 .history-btn {{
-  background: var(--accent); color: #0f172a; border: none; border-radius: 6px;
-  padding: 6px 14px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+  background: linear-gradient(135deg, #2F5DFF 0%, #7C3AED 100%); color: #fff; border: none;
+  border-radius: 999px; padding: 7px 16px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
   text-decoration: none; display: inline-flex; align-items: center;
 }}
-.history-btn:hover {{ opacity: 0.85; }}
+.history-btn:hover {{ opacity: 0.88; }}
 .history-btn-secondary {{ background: var(--surface2); color: var(--text2); }}
 
 /* Overview chips */
@@ -1260,43 +1848,58 @@ a:hover {{ text-decoration: underline; }}
 .overview-chip {{
   display: flex; align-items: center; gap: 8px;
   background: var(--surface); border: 1.5px solid; border-radius: 999px;
-  padding: 6px 14px; cursor: pointer; transition: background .15s;
-  text-decoration: none; color: inherit;
+  padding: 7px 15px; cursor: pointer; transition: all .15s;
+  text-decoration: none; color: inherit; box-shadow: var(--shadow-sm);
 }}
-.overview-chip:hover {{ background: var(--surface2); }}
+.overview-chip:hover {{ transform: translateY(-1px); box-shadow: var(--shadow-md); }}
 .chip-icon {{ font-size: 1rem; }}
-.chip-label {{ font-size: 0.82rem; color: var(--text2); }}
+.chip-label {{ font-size: 0.82rem; color: var(--text2); font-weight: 600; }}
 .chip-count {{ font-size: 0.75rem; font-weight: 700; color: #fff;
-              border-radius: 999px; padding: 1px 7px; }}
-.chip-delta {{ font-size: 0.7rem; font-weight: 700; border-radius: 4px; padding: 1px 5px; }}
-.delta-up {{ background: #14532d; color: #4ade80; }}
-.delta-down {{ background: #450a0a; color: #f87171; }}
+              border-radius: 999px; padding: 1px 8px; }}
+.chip-delta {{ font-size: 0.7rem; font-weight: 700; border-radius: 6px; padding: 1px 6px; }}
+.delta-up {{ background: #F0FDF4; color: #16A34A; }}
+.delta-down {{ background: #FEF2F2; color: #DC2626; }}
 .delta-flat {{ background: var(--surface2); color: var(--text3); }}
 
-/* Category sections */
-.category-section {{ margin-bottom: 32px; scroll-margin-top: 16px; }}
+/* Sections grid — auto-adapts to 1/2/3 columns depending on viewport width,
+   so widescreen viewing isn't wasted on a single long vertical column. */
+.sections-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 20px;
+  align-items: start;
+}}
+
+/* Category sections — each is now a self-contained panel (card) so it
+   reads cleanly as a column/tile when sitting next to its siblings. */
+.category-section {{
+  margin-bottom: 0; scroll-margin-top: 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 18px; padding: 18px 20px; box-shadow: var(--shadow-sm);
+}}
 .category-header {{
   display: flex; align-items: center; gap: 10px;
   border-left: 4px solid; padding-left: 12px; margin-bottom: 14px;
 }}
 .cat-icon {{ font-size: 1.2rem; }}
-.cat-title {{ font-size: 1.05rem; font-weight: 700; flex: 1; }}
+.cat-title {{ font-size: 1.08rem; font-weight: 800; flex: 1; color: var(--text); }}
 .cat-count {{ font-size: 0.75rem; font-weight: 700; color: #fff;
-             border-radius: 999px; padding: 2px 10px; }}
+             border-radius: 999px; padding: 2px 11px; }}
 .cat-desc {{ font-size: 0.78rem; color: var(--text3); line-height: 1.6;
              padding: 6px 0 10px 26px; border-left: 1px solid var(--border);
              margin: 0 0 10px 4px; }}
 
 /* Highlight box — "今日要点" synthesis */
 .highlight-box {{
-  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  background: var(--surface2);
   border: 1px solid var(--border); border-left: 3px solid;
-  border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+  border-radius: 14px; padding: 14px 18px; margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
 }}
 .highlight-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
 .highlight-title {{ font-size: 0.85rem; font-weight: 700; color: var(--text); }}
-.highlight-method {{ font-size: 0.68rem; color: var(--text3); background: var(--bg);
-                     border-radius: 4px; padding: 2px 6px; }}
+.highlight-method {{ font-size: 0.68rem; color: var(--text3); background: var(--surface2);
+                     border-radius: 6px; padding: 2px 7px; }}
 .highlight-list {{ list-style: none; display: flex; flex-direction: column; gap: 6px; }}
 .highlight-list li {{
   font-size: 0.83rem; color: var(--text2); line-height: 1.5; padding-left: 14px;
@@ -1318,29 +1921,30 @@ a:hover {{ text-decoration: underline; }}
 }}
 .cards-container.scrollable::-webkit-scrollbar-track {{ background: transparent; }}
 .empty-section {{ color: var(--text3); font-size: 0.85rem;
-                  padding: 16px; background: var(--surface); border-radius: 8px; }}
+                  padding: 18px; background: var(--surface); border: 1px solid var(--border);
+                  border-radius: 14px; }}
 
 /* Info cards */
 .info-card {{
-  background: var(--surface); border-radius: 10px;
-  border-left: 3px solid; padding: 16px;
-  transition: background .15s;
+  background: var(--surface); border-radius: 14px;
+  border: 1px solid var(--border); border-left: 3px solid; padding: 16px;
+  transition: all .15s; box-shadow: var(--shadow-sm);
 }}
-.info-card:hover {{ background: var(--surface2); }}
+.info-card:hover {{ box-shadow: var(--shadow-md); transform: translateY(-1px); }}
 .card-header {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }}
-.card-title {{ font-size: 0.95rem; font-weight: 600; color: var(--text); flex: 1; }}
+.card-title {{ font-size: 0.95rem; font-weight: 700; color: var(--text); flex: 1; }}
 .card-meta {{ display: flex; gap: 6px; flex-shrink: 0; align-items: center; flex-wrap: wrap; }}
 .time-badge {{
   font-size: 0.72rem; background: var(--surface2); color: var(--text2);
-  border-radius: 4px; padding: 2px 7px;
+  border-radius: 6px; padding: 2px 8px;
 }}
 .multi-source-badge {{
-  font-size: 0.72rem; background: #1e3a5f; color: #7dd3fc;
-  border-radius: 4px; padding: 2px 7px;
+  font-size: 0.72rem; background: #EFF6FF; color: #2563EB;
+  border-radius: 6px; padding: 2px 8px;
 }}
-.signal-badge {{ font-size: 0.72rem; border-radius: 4px; padding: 2px 7px; font-weight: 600; }}
-.signal-strong {{ background: #451a03; color: #fb923c; }}
-.signal-medium {{ background: #1e3a5f; color: #7dd3fc; }}
+.signal-badge {{ font-size: 0.72rem; border-radius: 6px; padding: 2px 8px; font-weight: 600; }}
+.signal-strong {{ background: #FFF7ED; color: #EA580C; }}
+.signal-medium {{ background: #EFF6FF; color: #2563EB; }}
 .card-summary {{ font-size: 0.83rem; color: var(--text2); margin-bottom: 8px; }}
 .card-time {{ font-size: 0.75rem; color: var(--text3); margin-bottom: 8px; }}
 
@@ -1353,30 +1957,30 @@ a:hover {{ text-decoration: underline; }}
 .sources-details[open] summary {{ color: var(--text2); }}
 .sources-list {{ margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }}
 .source-item {{
-  background: var(--bg); border-radius: 6px; padding: 8px 10px;
+  background: var(--bg); border-radius: 8px; padding: 8px 10px;
   font-size: 0.78rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
 }}
-.source-name {{ font-weight: 600; color: var(--accent); }}
-.source-type {{ color: var(--text3); background: var(--surface2); border-radius: 3px; padding: 0 5px; }}
+.source-name {{ font-weight: 700; color: var(--accent); }}
+.source-type {{ color: var(--text3); background: var(--surface2); border-radius: 4px; padding: 0 6px; }}
 .source-title {{ color: var(--text2); flex: 1; min-width: 100px; }}
 .source-time {{ color: var(--text3); white-space: nowrap; }}
 .source-link {{ word-break: break-all; }}
 
 /* Collapsed sections */
 .collapsed-section {{
-  background: var(--surface); border-radius: 8px;
+  background: var(--surface); border-radius: 12px;
   border: 1px solid var(--border); margin-bottom: 10px;
 }}
 .collapsed-section > summary {{
   padding: 12px 16px; cursor: pointer; font-size: 0.85rem;
-  color: var(--text2); list-style: none; user-select: none;
+  color: var(--text2); list-style: none; user-select: none; font-weight: 600;
 }}
 .collapsed-section > summary::-webkit-details-marker {{ display:none; }}
 .collapsed-section[open] > summary {{ color: var(--text); border-bottom: 1px solid var(--border); }}
 .collapsed-content {{ padding: 12px 16px; }}
 .fail-item {{ padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }}
 .fail-item:last-child {{ border-bottom: none; }}
-.error-text {{ color: #f87171; font-size: 0.78rem; }}
+.error-text {{ color: #DC2626; font-size: 0.78rem; }}
 .filtered-item {{ padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--text2); }}
 .filtered-item:last-child {{ border-bottom: none; }}
 .note {{ font-size: 0.78rem; color: var(--text3); margin-top: 8px; }}
@@ -1384,7 +1988,7 @@ a:hover {{ text-decoration: underline; }}
 /* Collapsed zone header */
 .collapsed-zone {{ margin-top: 32px; }}
 .collapsed-zone-title {{ font-size: 0.8rem; color: var(--text3);
-  text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }}
+  text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; font-weight: 700; }}
 
 @media (max-width: 600px) {{
   .meta-grid {{ grid-template-columns: 1fr 1fr; }}
@@ -1413,13 +2017,21 @@ a:hover {{ text-decoration: underline; }}
 <!-- HISTORY NAV -->
 {history_nav_html}
 
+<!-- EXECUTIVE BRIEF -->
+{executive_brief_html}
+
+<!-- COMPETITOR MATRIX -->
+{competitor_matrix_html}
+
 <!-- OVERVIEW -->
 <div class="overview">
 {overview_html}
 </div>
 
 <!-- MAIN SECTIONS -->
+<div class="sections-grid">
 {sections_html}
+</div>
 
 <!-- COLLAPSED ZONE -->
 <div class="collapsed-zone">
@@ -1479,12 +2091,16 @@ def save_outputs(data):
     stats = data["stats"]
     json_data = {
         "stats": stats,
+        "executive_brief": data.get("executive_brief", {}),
+        "competitor_matrix": data.get("competitor_matrix", []),
         "categories": {
             cat: [
                 {
                     "title": g["title"],
                     "summary": g["summary"],
                     "source_count": len(g["sources"]),
+                    "brands": g.get("brands", []),
+                    "signal": g.get("signal", {}),
                     "earliest_dt": g["earliest_dt"].isoformat() if g["earliest_dt"] else None,
                     "latest_dt":   g["latest_dt"].isoformat() if g["latest_dt"] else None,
                     "sources": [s.to_dict() for s in g["sources"]],

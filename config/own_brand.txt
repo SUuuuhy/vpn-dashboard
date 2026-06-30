@@ -1,0 +1,12 @@
+# 在这里填写"我方"品牌名称，用于区分"我方风险"和"竞品动态"。
+# 必须与 scripts/update_dashboard.py 中 BRAND_REGISTRY 字典里的品牌名称完全一致
+# （大小写、符号都要对应，例如 X-VPN 不要写成 xvpn）。
+#
+# 留空（删除下面这一行）则不区分我方/竞品，所有品牌都按"该品牌自身的处境"
+# 标注正负面，不会有"潜在机会/值得警惕"这类相对我方而言的判断。
+#
+# 当前已识别的品牌列表（见 BRAND_REGISTRY）：
+# NordVPN, ExpressVPN, Surfshark, ProtonVPN, Mullvad, Windscribe, PIA,
+# CyberGhost, IPVanish, X-VPN, AirVPN
+
+X-VPN

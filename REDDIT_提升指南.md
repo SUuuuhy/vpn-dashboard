@@ -146,3 +146,61 @@ r/VPN手工,https://reddit.com/r/VPN/comments/xxx,reddit讨论,用户反映NordV
 **2026 年的现实是：Reddit 个人开发者很难再像过去一样轻松拿到 OAuth API Key。
 好消息是——本项目已经把 RSS / old.reddit 等免密钥方式设为主路径，
 大多数情况下你什么都不用做，面板照常出数据。OAuth 只是锦上添花，不是必需品。**
+
+---
+
+# 社交媒体板块抓不到信息？— Nitter（Twitter抓取代理）结构性失效说明
+
+如果你发现「社交媒体」板块始终是空的，**这不是脚本的 bug**，是外部依赖本身坏了。
+
+## 问题根源
+
+「社交媒体」板块目前依赖 `nitter.net`——一个第三方搭建的 Twitter/X 抓取代理，
+原理是绕过 X 官方 API 直接抓取公开页面。但：
+
+1. **2023-2024年起**：X 官方封锁了 Nitter 用来匿名抓取的"访客账号"机制，
+   导致几乎所有公开 Nitter 实例不稳定甚至直接关闭
+2. **2026年现状更严峻**：即便部分 Nitter 实例显示"在线"，**RSS 功能本身在大多数
+   存活实例上也已被关闭**——也就是说，换一个 Nitter 地址也救不了，因为问题不是
+   "这个网站挂了"，而是"这个功能这条路本身被堵死了"
+
+本项目已经在脚本里加了**多实例轮询兜底**（`NITTER_INSTANCES` 列表，依次尝试
+nitter.net、xcancel.com、nitter.poast.org 等6个实例），但根据目前的外部环境，
+**这个板块大概率仍然会持续抓不到内容，这是合理预期，不代表配置出错**。
+
+## 推荐替代方案：用 YouTube 官方 RSS 监控品牌动态
+
+YouTube 提供官方、免费、无需 API Key 的 RSS 订阅功能，**100% 稳定可靠**，
+不依赖任何第三方代理，是 Twitter 监控失效后最现实的替代品。
+
+### 如何获取一个 YouTube 频道的 RSS 链接（无需写代码）
+
+1. 打开该品牌的 YouTube 频道主页（例如 NordVPN 官方频道）
+2. 在浏览器地址栏，网页源代码中找频道 ID：
+   - 右键页面 → 「查看页面源代码」（或按 Ctrl+U）
+   - 按 Ctrl+F 搜索 `channelId`
+   - 会看到类似 `"channelId":"UCxxxxxxxxxxxxxxxxxxxxxx"` 的内容，
+     复制这串 `UC` 开头的字符（这就是频道ID）
+3. 拼出 RSS 地址，格式固定为：
+   ```
+   https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxxxx
+   ```
+4. 打开 `config/sources.csv`，把这个地址填到对应品牌的 YouTube 行里
+   （已经预留了 NordVPN/ExpressVPN/Surfshark 三行模板，把
+   `填入频道ID` 替换成你找到的真实 ID）
+5. 把那一行的 `enabled` 从 `false` 改成 `true`
+6. Commit + Push，下次运行时这个来源就会生效
+
+### 为什么 YouTube 比 Twitter 监控更可靠
+
+- 官方原生支持，不需要任何第三方代理或抓取技巧
+- 不需要 API Key、不需要登录、不会被限流
+- 唯一的代价是：只能看到视频发布动态，看不到纯文字推文
+  （但官方 VPN 品牌的重大公告通常也会同步发视频，覆盖率不算差）
+
+## 如果你仍然想保留 Twitter/X 监控
+
+- 可以手动用 `config/manual_inputs.csv` 补充重要推文（复制标题/链接/时间）
+- 如果业务需要更系统化的 Twitter 监控，唯一稳定方案是申请 X 官方 Developer API
+  （需付费，最低档约 $100/月起，超出本项目"零成本/低成本"的设计目标，
+  不建议作为首选）

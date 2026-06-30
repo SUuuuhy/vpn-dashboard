@@ -1,7 +1,7 @@
 {
   "stats": {
-    "run_time_sgt": "2026-06-30 11:53 SGT",
-    "run_time_iso": "2026-06-30T11:53:14.513192+08:00",
+    "run_time_sgt": "2026-06-30 14:31 SGT",
+    "run_time_iso": "2026-06-30T14:31:27.951408+08:00",
     "timezone": "Asia/Singapore (SGT, UTC+8)",
     "lookback_hours": 48,
     "grace_hours": 12,
@@ -25,8 +25,14 @@
       "reddit讨论": null,
       "政策风险": null,
       "第三方网站": null
-    }
+    },
+    "own_brand": "X-VPN"
   },
+  "executive_brief": {
+    "text": "🟢 平稳：我方品牌「X-VPN」今日未检测到风险信号。\n共抓取 0 条已合并事件，覆盖 0 个品牌。",
+    "method": "规则"
+  },
+  "competitor_matrix": [],
   "categories": {
     "竞品动态": [],
     "社交媒体": [],

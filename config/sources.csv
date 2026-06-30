@@ -9,11 +9,14 @@ Windscribe Blog,https://blog.windscribe.com/,竞品动态,Windscribe官方博客
 IPVanish Blog,https://www.ipvanish.com/blog/,竞品动态,IPVanish官方博客：产品/功能,2,true
 PIA Blog,https://www.privateinternetaccess.com/blog/,竞品动态,PIA官方博客：隐私/产品,2,true
 CyberGhost Blog,https://www.cyberghostvpn.com/privacyhub/,竞品动态,CyberGhost官方博客：隐私/产品,2,true
-NordVPN Twitter,https://nitter.net/NordVPN/rss,社交媒体,NordVPN官方X/Twitter：产品公告/促销/用户互动,1,true
-ExpressVPN Twitter,https://nitter.net/expressvpn/rss,社交媒体,ExpressVPN官方X/Twitter：产品/促销/公告,1,true
-Surfshark Twitter,https://nitter.net/Surfshark/rss,社交媒体,Surfshark官方X/Twitter：产品/促销/公告,1,true
-ProtonVPN Twitter,https://nitter.net/ProtonVPN/rss,社交媒体,ProtonVPN官方X/Twitter：隐私/产品/公告,1,true
-Mullvad Twitter,https://nitter.net/mullvadvpn/rss,社交媒体,Mullvad官方X/Twitter：隐私/产品/公告,2,true
+NordVPN Twitter,https://nitter.net/NordVPN/rss,社交媒体,NordVPN官方X/Twitter（经Nitter代理抓取，2026年起Nitter结构性不稳定，已加多实例轮询兜底）,1,true
+ExpressVPN Twitter,https://nitter.net/expressvpn/rss,社交媒体,ExpressVPN官方X/Twitter（经Nitter代理抓取，同上注意事项）,1,true
+Surfshark Twitter,https://nitter.net/Surfshark/rss,社交媒体,Surfshark官方X/Twitter（经Nitter代理抓取，同上注意事项）,1,true
+ProtonVPN Twitter,https://nitter.net/ProtonVPN/rss,社交媒体,ProtonVPN官方X/Twitter（经Nitter代理抓取，同上注意事项）,1,true
+Mullvad Twitter,https://nitter.net/mullvadvpn/rss,社交媒体,Mullvad官方X/Twitter（经Nitter代理抓取，同上注意事项）,2,true
+NordVPN YouTube,https://www.youtube.com/feeds/videos.xml?channel_id=填入频道ID,社交媒体,NordVPN官方YouTube频道（需自行获取channel_id，见README「社交媒体监控」章节）,2,false
+ExpressVPN YouTube,https://www.youtube.com/feeds/videos.xml?channel_id=填入频道ID,社交媒体,ExpressVPN官方YouTube频道（需自行获取channel_id）,2,false
+Surfshark YouTube,https://www.youtube.com/feeds/videos.xml?channel_id=填入频道ID,社交媒体,Surfshark官方YouTube频道（需自行获取channel_id）,2,false
 r/VPN,https://www.reddit.com/r/VPN/,reddit讨论,综合VPN讨论：用户抱怨/推荐/流媒体解锁/隐私/价格比较,1,true
 r/nordvpn,https://www.reddit.com/r/nordvpn/,reddit讨论,NordVPN用户讨论：故障/评价/节点问题,1,true
 r/ProtonVPN,https://www.reddit.com/r/ProtonVPN/,reddit讨论,ProtonVPN用户讨论：隐私/功能/问题,1,true
