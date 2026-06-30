@@ -1104,7 +1104,8 @@ def enrich_articles_with_ai_summary(cat_groups):
 
 def generate_ai_highlights(cat, groups):
     """Call Anthropic API to synthesize what's actually being discussed.
-    Returns list[str] (bullets) or None on any failure (caller falls back)."""
+    Returns a short paragraph (str, 2-4 connected sentences) or None on
+    any failure (caller falls back)."""
     if not ANTHROPIC_API_KEY or not groups:
         return None
     try:
@@ -1121,10 +1122,12 @@ def generate_ai_highlights(cat, groups):
             f"以下是「{cat}」类别下，过去时效窗口内抓取到的 VPN 行业信息条目（JSON数组，"
             f"source_count 表示有多少独立来源报道了同一件事，数值越高说明信号越强）：\n\n"
             f"{json.dumps(payload_items, ensure_ascii=False)}\n\n"
-            "请用中文写出 3-5 条「今日要点」，每条不超过35字，帮助阅读者快速抓住"
-            "本类别用户/媒体/官方在讨论什么、有什么共性趋势或异常信号。"
+            "请用中文写一段「今日要点」，用2-4句连贯的话概括本类别整体在讲什么——"
+            "像是写给同事看的简短总结段落，不是罗列要点或关键词堆叠。"
+            "要点之间要用合适的连接词自然衔接（比如'此外''与此同时''值得注意的是'），"
+            "读起来是完整的一段话，不是分行列表。"
             "只做客观信息归纳，不要给出运营建议、增长建议或下一步行动。"
-            "直接输出要点列表，每行一条，不要编号前缀、不要多余说明文字。"
+            "直接输出这段话本身，不要标题、不要编号、不要换行分段、不要多余说明文字。"
         )
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -1135,15 +1138,15 @@ def generate_ai_highlights(cat, groups):
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 400,
+                "max_tokens": 300,
                 "messages": [{"role": "user", "content": prompt}],
             },
             timeout=30,
         )
         r.raise_for_status()
         text = "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
-        bullets = [ln.strip("•-* 　").strip() for ln in text.strip().split("\n") if ln.strip()]
-        return bullets[:5] if bullets else None
+        text = text.strip()
+        return text if text else None
     except Exception as e:
         log.warning(f"AI highlight generation failed for {cat}: {e}")
         return None
@@ -1169,6 +1172,29 @@ def describe_group_zh(g):
 
     if brand_str:
         return f"{brand_str}：{topic}{src_tag}"
+    return f"{topic}{src_tag}"
+
+def describe_group_zh_sentence(g):
+    """Grammar-friendly variant of describe_group_zh for embedding mid-sentence
+    in a flowing paragraph (uses '的' instead of '：' so it reads naturally
+    after connectors like '最受关注的是...')."""
+    text = g["title"] + " " + (g["summary"] or "")
+    sentiment = g.get("signal", {}).get("sentiment", "neutral")
+    brands = g.get("brands", [])
+    brand_str = "、".join(brands) if brands else ""
+
+    if sentiment == "risk":
+        topic = match_topic(text, RISK_TOPIC_MAP, "负面信号")
+    elif sentiment == "positive":
+        topic = match_topic(text, POSITIVE_TOPIC_MAP, "正面信号")
+    else:
+        topic = "相关动态"
+
+    src_n = len(g["sources"])
+    src_tag = f"（{src_n}个来源印证）" if src_n > 1 else ""
+
+    if brand_str:
+        return f"{brand_str}的{topic}问题{src_tag}"
     return f"{topic}{src_tag}"
 
 def describe_text_zh(title, summary="", brands=None):
@@ -1198,33 +1224,60 @@ def describe_text_zh(title, summary="", brands=None):
     return f"{brand_str}：{topic}" if brand_str else topic
 
 def generate_rule_based_highlights(cat, groups):
-    """No-AI fallback: produces genuine Chinese summary sentences built from
-    structured signals (brand/topic/source-count), not raw (often English)
-    titles — so this reads as an actual Chinese summary either way."""
+    """No-AI fallback: stitches structured signals (brand/topic/source-count)
+    into a short coherent Chinese paragraph (2-4 sentences) — not a bulleted
+    list of fragments, and not raw (often English) titles either."""
     if not groups:
-        return ["本时效窗口内暂无该类别有效信息"]
+        return "本时效窗口内暂无该类别有效信息。"
 
+    n = len(groups)
     top = sorted(groups, key=importance_score, reverse=True)[:3]
-    bullets = [describe_group_zh(g) for g in top]
 
-    # Aggregate topic frequency across ALL groups in this category (not just
-    # top 3) to give a genuine "这个类别整体在讲什么" Chinese summary line.
+    # Aggregate topic frequency across ALL groups (not just top 3) for the
+    # closing "整体来看" sentence.
     topic_counter = defaultdict(int)
+    risk_n = pos_n = 0
     for g in groups:
         text = g["title"] + " " + (g["summary"] or "")
         sentiment = g.get("signal", {}).get("sentiment", "neutral")
         if sentiment == "risk":
+            risk_n += 1
             topic_counter[match_topic(text, RISK_TOPIC_MAP, "负面信号")] += 1
         elif sentiment == "positive":
+            pos_n += 1
             topic_counter[match_topic(text, POSITIVE_TOPIC_MAP, "正面信号")] += 1
+
+    sentences = [f"本类别今日共有 {n} 条相关信息。"]
+
+    # First sentence about the single most important item.
+    if top:
+        first = top[0]
+        first_desc = describe_group_zh_sentence(first)  # e.g. "NordVPN的连接故障问题（3个来源印证）"
+        sentences.append(f"其中最受关注的是{first_desc}。")
+
+    # Second sentence stitches in 1-2 more notable items with connectors,
+    # so it reads as a continuing narrative rather than a second bullet.
+    rest = top[1:]
+    if rest:
+        rest_descs = [describe_group_zh_sentence(g) for g in rest]
+        connector = "此外，" if len(rest_descs) == 1 else "与此同时，"
+        sentences.append(f"{connector}{'；'.join(rest_descs)}也值得关注。")
+
+    # Closing sentence: overall tone + dominant topics across the FULL set.
     if topic_counter:
         ranked_topics = sorted(topic_counter.items(), key=lambda x: x[1], reverse=True)[:3]
         topics_str = "、".join(t for t, _ in ranked_topics)
-        bullets.append(f"本类别共 {len(groups)} 条信息，热点集中在：{topics_str}")
+        if risk_n > pos_n:
+            tone = "整体偏负面"
+        elif pos_n > risk_n:
+            tone = "整体偏正面"
+        else:
+            tone = "正负面信号并存"
+        sentences.append(f"整体来看，本类别热点集中在{topics_str}，{tone}。")
     else:
-        bullets.append(f"本类别共 {len(groups)} 条信息，整体未检测到明显正负面信号")
+        sentences.append("整体来看，本类别未检测到明显的正负面倾向，以常规动态为主。")
 
-    return bullets
+    return "".join(sentences)
 
 def generate_category_highlights(cat, groups):
     ai_result = generate_ai_highlights(cat, groups)
@@ -1490,12 +1543,13 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
     competitor_matrix = build_competitor_matrix(cat_groups, own_brand)
     log.info(f"Competitor matrix: {len(competitor_matrix)} active brands")
 
-    # Generate per-category highlight summaries ("今日要点")
+    # Generate per-category highlight summaries ("今日要点") — a short
+    # coherent paragraph per category, not a bulleted list of fragments.
     cat_highlights = {}
     cat_highlight_method = {}
     for cat in CATEGORY_ORDER:
-        bullets, method = generate_category_highlights(cat, cat_groups[cat])
-        cat_highlights[cat] = bullets
+        summary_text, method = generate_category_highlights(cat, cat_groups[cat])
+        cat_highlights[cat] = summary_text
         cat_highlight_method[cat] = method
 
     # Executive brief ("今日简报") — shareable cross-category summary
@@ -1902,8 +1956,8 @@ def render_html(data, mode="index", current_date=""):
         icon   = CATEGORY_ICONS.get(cat, "•")
         count  = len(groups)
         desc   = CATEGORY_DESC.get(cat, "")
-        highlights = cat_highlights.get(cat, [])
-        h_method   = cat_highlight_method.get(cat, "规则")
+        highlight_text = cat_highlights.get(cat, "")
+        h_method       = cat_highlight_method.get(cat, "规则")
 
         if groups:
             cards_html = "\n".join(render_group_card(g, cat) for g in groups)
@@ -1912,16 +1966,15 @@ def render_html(data, mode="index", current_date=""):
 
         desc_html = f'<p class="cat-desc">{desc}</p>' if desc else ""
 
-        # "今日要点" synthesis box
-        highlight_items = "".join(f'<li>{h}</li>' for h in highlights)
-        method_tag = "🤖 AI摘要" if h_method == "AI" else "📊 关键词/要点提取"
+        # "今日要点" synthesis box — a short coherent paragraph, not a bullet list
+        method_tag = "🤖 AI摘要" if h_method == "AI" else "📊 规则摘要"
         highlight_html = f"""<div class="highlight-box" style="border-color:{color}">
     <div class="highlight-header">
       <span class="highlight-title">💡 今日要点</span>
       <span class="highlight-method">{method_tag}</span>
     </div>
-    <ul class="highlight-list">{highlight_items}</ul>
-  </div>""" if highlights else ""
+    <p class="highlight-text">{highlight_text}</p>
+  </div>""" if highlight_text else ""
 
         # Scrollable container only kicks in visually past ~4 cards (CSS max-height handles it)
         scroll_class = "cards-container scrollable" if count > 4 else "cards-container"
@@ -2209,12 +2262,9 @@ a:hover {{ text-decoration: underline; }}
 .highlight-title {{ font-size: 0.85rem; font-weight: 700; color: var(--text); }}
 .highlight-method {{ font-size: 0.68rem; color: var(--text3); background: var(--surface2);
                      border-radius: 6px; padding: 2px 7px; }}
-.highlight-list {{ list-style: none; display: flex; flex-direction: column; gap: 6px; }}
-.highlight-list li {{
-  font-size: 0.83rem; color: var(--text2); line-height: 1.5; padding-left: 14px;
-  position: relative;
+.highlight-text {{
+  font-size: 0.85rem; color: var(--text2); line-height: 1.7;
 }}
-.highlight-list li::before {{ content: "▸"; position: absolute; left: 0; color: var(--accent); }}
 
 .cards-container {{ display: flex; flex-direction: column; gap: 12px; }}
 
