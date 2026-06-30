@@ -1,0 +1,108 @@
+name: Weekly Growth Signals Report
+
+on:
+  schedule:
+    # Every Monday at 09:00 SGT = 01:00 UTC Monday
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: '分析窗口天数（默认30）'
+        required: false
+        default: '30'
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-growth:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required files
+        run: |
+          echo "=== Checking required files ==="
+          for f in requirements.txt scripts/growth_signals.py scripts/update_dashboard.py scripts/restore_archive.py; do
+            if [ ! -f "$f" ]; then
+              echo "❌ MISSING: $f"
+              exit 1
+            else
+              echo "✅ Found: $f"
+            fi
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore archive history from live Pages site
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "=== Restoring docs/archive/ history (needed for 30-day trend analysis) ==="
+          python scripts/restore_archive.py
+
+      - name: Generate growth signals report
+        env:
+          WINDOW_DAYS: ${{ github.event.inputs.window_days || '30' }}
+        run: |
+          echo "=== Generating 增长信号周报 (window=${WINDOW_DAYS} days) ==="
+          python scripts/growth_signals.py
+          echo "Growth report generated ✅"
+
+      - name: Verify output
+        run: |
+          if [ ! -f "docs/growth.html" ]; then
+            echo "❌ docs/growth.html not found"
+            exit 1
+          fi
+          echo "✅ docs/growth.html exists ($(wc -c < docs/growth.html) bytes)"
+
+      - name: Regenerate today's daily dashboard too
+        env:
+          SKIP_NETWORK: 'false'
+          LOOKBACK_HOURS: '48'
+          TIMEZONE_GRACE_HOURS: '12'
+          REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT:    ${{ secrets.REDDIT_USER_AGENT }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # This keeps docs/index.html consistent with whatever is already live
+          # (rather than deploying a stale index.html alongside a fresh growth.html).
+          # If this step fails for any reason, we still proceed to deploy
+          # growth.html — a stale index.html is not a reason to block the
+          # growth report from shipping.
+          python scripts/update_dashboard.py --lookback-hours "${LOOKBACK_HOURS}" || echo "⚠️ daily regen failed, continuing with growth.html deploy anyway"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

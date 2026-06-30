@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-06-30T15:17:48.328968+08:00",
+  "window_days": 30,
+  "own_brand": "X-VPN",
+  "days_analyzed": 1,
+  "date_range": [
+    "2026-06-30",
+    "2026-06-30"
+  ],
+  "buckets": {
+    "self": [],
+    "feature_gap": [],
+    "content": []
+  }
+}

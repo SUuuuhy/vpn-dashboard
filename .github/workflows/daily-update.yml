@@ -82,7 +82,16 @@ jobs:
           pip install -r requirements.txt
           echo "Dependencies installed ✅"
 
-      # ── 5. Generate dashboard ────────────────────
+      # ── 5. Restore archive history from live Pages site ──
+      - name: Restore archive history
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "=== Restoring docs/archive/ history from Pages (no git commit needed) ==="
+          python scripts/restore_archive.py
+          echo "Restore step done (failures here are non-fatal by design)"
+
+      # ── 6. Generate dashboard ────────────────────
       - name: Generate dashboard
         env:
           REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
@@ -101,7 +110,7 @@ jobs:
             $([ "${SKIP_NETWORK}" = "true" ] && echo "--skip-network" || echo "")
           echo "Dashboard generated ✅"
 
-      # ── 6. Verify output ─────────────────────────
+      # ── 7. Verify output ─────────────────────────
       - name: Verify output files
         run: |
           echo "=== Verifying output ==="
@@ -115,17 +124,17 @@ jobs:
           fi
           ls -la docs/
 
-      # ── 7. Setup Pages ───────────────────────────
+      # ── 8. Setup Pages ───────────────────────────
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # ── 8. Upload artifact ───────────────────────
+      # ── 9. Upload artifact ───────────────────────
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
 
-      # ── 9. Deploy to Pages ───────────────────────
+      # ── 10. Deploy to Pages ───────────────────────
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

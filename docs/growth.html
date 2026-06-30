@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>增长信号周报</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #F5F7FC; --surface: #FFFFFF; --surface2: #EEF1F9; --border: #E3E7F2;
+  --text: #0B1220; --text2: #4B5568; --text3: #94A0B8;
+  --accent: #2F5DFF; --accent2: #7C3AED;
+  --shadow-sm: 0 1px 2px rgba(15,23,42,0.05); --shadow-md: 0 4px 16px rgba(15,23,42,0.07);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       background: var(--bg); color: var(--text); line-height: 1.6; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+
+.page-header {
+  background: linear-gradient(135deg, #2F5DFF 0%, #7C3AED 100%);
+  border-radius: 20px; padding: 26px; margin-bottom: 22px; box-shadow: var(--shadow-md);
+}
+.page-title { font-size: 1.5rem; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.page-subtitle { color: rgba(255,255,255,0.85); font-size: 0.85rem; margin-bottom: 4px; }
+.page-meta { color: rgba(255,255,255,0.7); font-size: 0.78rem; }
+.back-link {
+  display: inline-block; margin-top: 14px; background: rgba(255,255,255,0.18);
+  color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
+  padding: 6px 16px; font-size: 0.8rem; font-weight: 600;
+}
+.back-link:hover { background: rgba(255,255,255,0.28); text-decoration: none; }
+
+.method-note {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px 18px; margin-bottom: 22px; font-size: 0.8rem; color: var(--text3);
+  line-height: 1.7; box-shadow: var(--shadow-sm);
+}
+
+.bucket-section { margin-bottom: 32px; }
+.bucket-header {
+  display: flex; align-items: center; gap: 10px;
+  border-left: 4px solid; padding-left: 12px; margin-bottom: 8px;
+}
+.bucket-icon { font-size: 1.3rem; }
+.bucket-title { font-size: 1.15rem; font-weight: 800; flex: 1; color: var(--text); }
+.bucket-count { font-size: 0.75rem; font-weight: 700; color: #fff;
+                 border-radius: 999px; padding: 2px 12px; }
+.bucket-desc { font-size: 0.8rem; color: var(--text3); margin: 0 0 16px 4px; line-height: 1.6; }
+
+.topics-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px; align-items: start;
+}
+.empty-bucket { color: var(--text3); font-size: 0.85rem; padding: 20px;
+                 background: var(--surface); border: 1px solid var(--border);
+                 border-radius: 14px; grid-column: 1 / -1; }
+
+.topic-card {
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid;
+  border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow-sm);
+}
+.topic-header { display: flex; justify-content: space-between; align-items: flex-start;
+                 gap: 8px; margin-bottom: 8px; }
+.topic-name { font-size: 1rem; font-weight: 700; color: var(--text); }
+.strength-badge { font-size: 0.68rem; font-weight: 700; border-radius: 6px;
+                   padding: 3px 9px; white-space: nowrap; }
+.strength-persistent { background: #FEF2F2; color: #DC2626; }
+.strength-emerging { background: #FFFBEB; color: #D97706; }
+.topic-meta { font-size: 0.78rem; color: var(--text3); margin-bottom: 10px; }
+
+.topic-details summary { font-size: 0.8rem; color: var(--text3); cursor: pointer;
+                          list-style: none; padding: 4px 0; }
+.topic-details summary::-webkit-details-marker { display:none; }
+.topic-details[open] summary { color: var(--text2); }
+.eg-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+            max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.eg-item { background: var(--bg); border-radius: 8px; padding: 8px 10px;
+            font-size: 0.76rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.eg-date { color: var(--text3); white-space: nowrap; font-weight: 600; }
+.eg-brand { color: var(--accent); font-weight: 600; }
+.eg-cat { color: var(--text3); background: var(--surface2); border-radius: 4px; padding: 0 6px; }
+.eg-title { color: var(--text2); flex: 1; min-width: 100px; }
+.eg-link { word-break: break-all; }
+
+@media (max-width: 600px) {
+  .topics-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="page-header">
+  <div class="page-title">📈 增长信号周报</div>
+  <div class="page-subtitle">Growth Signals — 跨30天聚合，关键词主题聚类</div>
+  <div class="page-meta">分析窗口：过去 1 天（2026-06-30 至 2026-06-30） ｜ 我方品牌：X-VPN</div>
+  <a href="index.html" class="back-link">↩ 返回每日面板</a>
+</div>
+
+<div class="method-note">
+💡 <strong>这是什么：</strong>每周运行一次，把过去最多30天的归档数据按关键词主题做聚类，
+找出"反复出现"的话题/抱怨/需求。<strong>不做机会打分，不给运营建议</strong>——只是把聚类后的原始信号
+按出现天数排序列出来，你自己判断要不要跟进。🔥持续信号 = 在3个或以上不同日期出现过；
+💡观察中 = 出现次数还不够多，可能是噪音也可能是刚冒头的新趋势，仅供参考。
+</div>
+
+<section class="bucket-section">
+  <div class="bucket-header" style="border-left-color:#DC2626">
+    <span class="bucket-icon">🔧</span>
+    <h2 class="bucket-title">自身体验问题</h2>
+    <span class="bucket-count" style="background:#DC2626">0 个主题</span>
+  </div>
+  <p class="bucket-desc">我方品牌被反复吐槽的痛点（基于 config/own_brand.txt 配置的品牌）。这些是真实存在的产品体验缺口。</p>
+  <div class="topics-grid"><div class="empty-bucket">本窗口内暂无匹配该维度的信号</div></div>
+</section><section class="bucket-section">
+  <div class="bucket-header" style="border-left-color:#2F5DFF">
+    <span class="bucket-icon">🧩</span>
+    <h2 class="bucket-title">产品功能缺口</h2>
+    <span class="bucket-count" style="background:#2F5DFF">0 个主题</span>
+  </div>
+  <p class="bucket-desc">竞品用户反复吐槽的痛点（不含我方）。竞品的弱点，可能是我们的产品/功能机会——具体要不要做，你自己判断。</p>
+  <div class="topics-grid"><div class="empty-bucket">本窗口内暂无匹配该维度的信号</div></div>
+</section><section class="bucket-section">
+  <div class="bucket-header" style="border-left-color:#7C3AED">
+    <span class="bucket-icon">📢</span>
+    <h2 class="bucket-title">内容/营销角度</h2>
+    <span class="bucket-count" style="background:#7C3AED">0 个主题</span>
+  </div>
+  <p class="bucket-desc">不限定品牌、不限定情绪，单纯看哪些话题被反复讨论。用作内容选题、广告投放关键词的参考池。</p>
+  <div class="topics-grid"><div class="empty-bucket">本窗口内暂无匹配该维度的信号</div></div>
+</section>
+
+</div>
+</body>
+</html>

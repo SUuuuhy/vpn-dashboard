@@ -106,23 +106,73 @@ BRAND_REGISTRY = {
 # Rule-based sentiment/severity signal words — used when no AI key is
 # configured, and as a sanity baseline even when it is. Chinese + English
 # because sources are mostly English but manual_inputs.csv may be Chinese.
-RISK_SIGNAL_WORDS = [
-    "breach", "leak", "leaked", "outage", "down", "lawsuit", "sue", "sued", "fine", "fined",
-    "banned", "ban", "vulnerability", "vulnerable", "exploit", "hack", "hacked",
-    "complaint", "complaints", "refund", "scam", "fraud", "unstable", "disconnect",
-    "disconnected", "fail", "failed", "failure", "block", "blocked", "expose", "exposed",
-    "investigation", "fined", "penalty", "violation", "illegal", "data breach",
-    "断线", "漏洞", "诉讼", "处罚", "投诉", "退款", "欺诈", "封禁", "不稳定", "泄露",
-    "攻击", "下线", "故障", "罚款", "调查", "违规", "曝光", "扣款", "限流", "崩溃",
-]
-POSITIVE_SIGNAL_WORDS = [
-    "launch", "launches", "launched", "award", "awarded", "partnership", "upgrade",
-    "upgraded", "audit passed", "passed audit", "new feature", "milestone", "improve",
-    "improved", "improvement", "growth", "expand", "expansion", "celebrate", "winner",
-    "recommend", "recommended", "best vpn", "top pick", "successfully",
-    "获奖", "审计通过", "新功能", "上线", "合作", "升级", "突破", "好评", "推荐",
-    "增长", "扩张", "成功", "通过审计", "表彰", "认证",
-]
+# Mapped to a short Chinese topic label so rule-based "今日要点"/简报 can
+# produce genuine Chinese sentences instead of echoing raw (often English)
+# titles. Order matters: first match wins, so more specific terms go first.
+RISK_TOPIC_MAP = {
+    "data breach": "数据泄露", "breach": "数据泄露", "breaches": "数据泄露",
+    "leak": "数据泄露", "leaked": "数据泄露", "leaks": "数据泄露",
+    "泄露": "数据泄露", "曝光": "数据泄露",
+    "lawsuit": "法律诉讼", "lawsuits": "法律诉讼", "sue": "法律诉讼", "sued": "法律诉讼", "诉讼": "法律诉讼",
+    "fine": "监管处罚", "fines": "监管处罚", "fined": "监管处罚",
+    "penalty": "监管处罚", "penalties": "监管处罚", "罚款": "监管处罚", "处罚": "监管处罚",
+    "investigation": "监管调查", "investigations": "监管调查", "调查": "监管调查",
+    "violation": "合规问题", "violations": "合规问题", "illegal": "合规问题", "违规": "合规问题",
+    "banned": "封禁限制", "ban": "封禁限制", "block": "封禁限制", "blocks": "封禁限制",
+    "blocked": "封禁限制", "封禁": "封禁限制", "限流": "封禁限制",
+    "vulnerability": "安全漏洞", "vulnerabilities": "安全漏洞", "vulnerable": "安全漏洞",
+    "exploit": "安全漏洞", "exploits": "安全漏洞", "exploited": "安全漏洞",
+    "hack": "安全漏洞", "hacks": "安全漏洞", "hacked": "安全漏洞", "漏洞": "安全漏洞", "攻击": "安全漏洞",
+    "scam": "欺诈质疑", "scams": "欺诈质疑", "fraud": "欺诈质疑", "fraudulent": "欺诈质疑", "欺诈": "欺诈质疑",
+    "refund": "退款纠纷", "refunds": "退款纠纷", "refunded": "退款纠纷", "退款": "退款纠纷", "扣款": "退款纠纷",
+    "complaint": "用户投诉", "complaints": "用户投诉",
+    "complain": "用户投诉", "complains": "用户投诉", "complained": "用户投诉", "投诉": "用户投诉",
+    "outage": "连接故障", "outages": "连接故障", "down": "连接故障",
+    "disconnect": "连接故障", "disconnects": "连接故障", "disconnected": "连接故障", "disconnection": "连接故障",
+    "unstable": "连接故障", "instability": "连接故障",
+    "fail": "连接故障", "fails": "连接故障", "failed": "连接故障", "failure": "连接故障", "failures": "连接故障",
+    "断线": "连接故障", "不稳定": "连接故障", "下线": "连接故障", "故障": "连接故障", "崩溃": "连接故障",
+    "expose": "数据泄露", "exposed": "数据泄露", "exposes": "数据泄露",
+}
+POSITIVE_TOPIC_MAP = {
+    "audit passed": "审计/认证通过", "passed audit": "审计/认证通过", "审计通过": "审计/认证通过",
+    "通过审计": "审计/认证通过", "认证": "审计/认证通过",
+    "award": "获得奖项", "awards": "获得奖项", "awarded": "获得奖项",
+    "获奖": "获得奖项", "表彰": "获得奖项", "celebrate": "获得奖项", "winner": "获得奖项", "winners": "获得奖项",
+    "partnership": "达成合作", "partnerships": "达成合作", "合作": "达成合作",
+    "launch": "新功能上线", "launches": "新功能上线", "launched": "新功能上线",
+    "new feature": "新功能上线", "features": "新功能上线", "新功能": "新功能上线", "上线": "新功能上线",
+    "upgrade": "功能升级", "upgrades": "功能升级", "upgraded": "功能升级", "升级": "功能升级", "突破": "功能升级",
+    "growth": "业务增长", "expand": "业务增长", "expands": "业务增长", "expansion": "业务增长",
+    "增长": "业务增长", "扩张": "业务增长",
+    "recommend": "获评推荐", "recommends": "获评推荐", "recommended": "获评推荐", "best vpn": "获评推荐",
+    "top pick": "获评推荐", "好评": "获评推荐", "推荐": "获评推荐",
+    "milestone": "里程碑事件", "milestones": "里程碑事件",
+    "successfully": "运营成果", "success": "运营成果",
+    "improve": "体验改善", "improves": "体验改善",
+    "improved": "体验改善", "improvement": "体验改善", "improvements": "体验改善", "成功": "运营成果",
+}
+RISK_SIGNAL_WORDS = list(RISK_TOPIC_MAP.keys())
+POSITIVE_SIGNAL_WORDS = list(POSITIVE_TOPIC_MAP.keys())
+
+def contains_keyword(text_lower, kw):
+    """Keyword presence check that avoids embedded-substring false positives
+    (e.g. plain `'sue' in 'issues'` is True, which wrongly tags routine text
+    as a lawsuit). English keywords use word-boundary regex; Chinese
+    keywords keep substring matching since CJK text has no whitespace
+    tokenization to anchor word boundaries to."""
+    if re.search(r'[\u4e00-\u9fff]', kw):
+        return kw in text_lower
+    return re.search(r'\b' + re.escape(kw) + r'\b', text_lower) is not None
+
+def match_topic(text, topic_map, fallback):
+    """Find the first keyword from topic_map present in text, return its
+    Chinese topic label. Falls back to `fallback` if nothing matches."""
+    text_l = text.lower()
+    for kw, topic in topic_map.items():
+        if contains_keyword(text_l, kw):
+            return topic
+    return fallback
 
 DIRS = {
     "docs":    Path("docs"),
@@ -811,8 +861,8 @@ def classify_signal(group):
     执行摘要会用 AI 给出更精准的解读，但逐条标签始终走这套规则，保证稳定可控。
     """
     text = (group["title"] + " " + (group["summary"] or "")).lower()
-    risk_hits = sum(1 for w in RISK_SIGNAL_WORDS if w in text)
-    pos_hits  = sum(1 for w in POSITIVE_SIGNAL_WORDS if w in text)
+    risk_hits = sum(1 for w in RISK_SIGNAL_WORDS if contains_keyword(text, w))
+    pos_hits  = sum(1 for w in POSITIVE_SIGNAL_WORDS if contains_keyword(text, w))
 
     if risk_hits > pos_hits and risk_hits > 0:
         sentiment = "risk"
@@ -921,7 +971,7 @@ def build_competitor_matrix(cat_groups, own_brand=""):
                 if score > m["top_score"]:
                     m["top_score"] = score
                     m["top_item"] = {
-                        "title": g["title"], "category": cat,
+                        "title": g["title"], "summary": g.get("summary", ""), "category": cat,
                         "sentiment": sentiment, "severity": g["signal"]["severity"],
                         "stance": g.get("stance", "general"),
                     }
@@ -1009,19 +1059,56 @@ def generate_ai_highlights(cat, groups):
         log.warning(f"AI highlight generation failed for {cat}: {e}")
         return None
 
+def describe_group_zh(g):
+    """Build a short Chinese description of a group using structured signals
+    (brand + topic + source count) rather than echoing the (often English)
+    raw title verbatim."""
+    text = g["title"] + " " + (g["summary"] or "")
+    sentiment = g.get("signal", {}).get("sentiment", "neutral")
+    brands = g.get("brands", [])
+    brand_str = "、".join(brands) if brands else ""
+
+    if sentiment == "risk":
+        topic = match_topic(text, RISK_TOPIC_MAP, "负面信号")
+    elif sentiment == "positive":
+        topic = match_topic(text, POSITIVE_TOPIC_MAP, "正面信号")
+    else:
+        topic = "相关动态"
+
+    src_n = len(g["sources"])
+    src_tag = f"（{src_n}个来源印证）" if src_n > 1 else ""
+
+    if brand_str:
+        return f"{brand_str}：{topic}{src_tag}"
+    return f"{topic}{src_tag}"
+
 def generate_rule_based_highlights(cat, groups):
-    """No-AI fallback: surface the top stories by importance + frequent keywords."""
+    """No-AI fallback: produces genuine Chinese summary sentences built from
+    structured signals (brand/topic/source-count), not raw (often English)
+    titles — so this reads as an actual Chinese summary either way."""
     if not groups:
         return ["本时效窗口内暂无该类别有效信息"]
+
     top = sorted(groups, key=importance_score, reverse=True)[:3]
-    bullets = []
-    for g in top:
-        src_n = len(g["sources"])
-        tag = f"（{src_n}个来源印证）" if src_n > 1 else ""
-        bullets.append(f"{g['title'][:50]}{tag}")
-    keywords = extract_keywords(groups)
-    if keywords:
-        bullets.append("高频关键词：" + "、".join(keywords[:6]))
+    bullets = [describe_group_zh(g) for g in top]
+
+    # Aggregate topic frequency across ALL groups in this category (not just
+    # top 3) to give a genuine "这个类别整体在讲什么" Chinese summary line.
+    topic_counter = defaultdict(int)
+    for g in groups:
+        text = g["title"] + " " + (g["summary"] or "")
+        sentiment = g.get("signal", {}).get("sentiment", "neutral")
+        if sentiment == "risk":
+            topic_counter[match_topic(text, RISK_TOPIC_MAP, "负面信号")] += 1
+        elif sentiment == "positive":
+            topic_counter[match_topic(text, POSITIVE_TOPIC_MAP, "正面信号")] += 1
+    if topic_counter:
+        ranked_topics = sorted(topic_counter.items(), key=lambda x: x[1], reverse=True)[:3]
+        topics_str = "、".join(t for t, _ in ranked_topics)
+        bullets.append(f"本类别共 {len(groups)} 条信息，热点集中在：{topics_str}")
+    else:
+        bullets.append(f"本类别共 {len(groups)} 条信息，整体未检测到明显正负面信号")
+
     return bullets
 
 def generate_category_highlights(cat, groups):
@@ -1029,6 +1116,35 @@ def generate_category_highlights(cat, groups):
     if ai_result:
         return ai_result, "AI"
     return generate_rule_based_highlights(cat, groups), "规则"
+
+def summarize_category_for_brief(cat, groups):
+    """One Chinese line per category for the executive brief — gives the
+    "每个分类的总结" the user asked for, without needing AI."""
+    if not groups:
+        return f"{cat}：暂无有效信息"
+    n = len(groups)
+    topic_counter = defaultdict(int)
+    risk_n = pos_n = 0
+    for g in groups:
+        text = g["title"] + " " + (g["summary"] or "")
+        sentiment = g.get("signal", {}).get("sentiment", "neutral")
+        if sentiment == "risk":
+            risk_n += 1
+            topic_counter[match_topic(text, RISK_TOPIC_MAP, "负面信号")] += 1
+        elif sentiment == "positive":
+            pos_n += 1
+            topic_counter[match_topic(text, POSITIVE_TOPIC_MAP, "正面信号")] += 1
+
+    if topic_counter:
+        top_topic = max(topic_counter.items(), key=lambda x: x[1])[0]
+        if risk_n > pos_n:
+            tone = "偏负面"
+        elif pos_n > risk_n:
+            tone = "偏正面"
+        else:
+            tone = "正负面并存"
+        return f"{cat}：{n}条信息，{tone}（以{top_topic}为主）"
+    return f"{cat}：{n}条信息，整体为中性常规动态"
 
 # ─────────────────────────────────────────────
 # EXECUTIVE BRIEF — 今日简报 (shareable, cross-category)
@@ -1061,6 +1177,15 @@ def generate_ai_brief(cat_groups, competitor_matrix, own_brand=""):
             }
             for m in competitor_matrix
         ]
+        category_stats = [
+            {
+                "category": cat,
+                "count": len(cat_groups.get(cat, [])),
+                "risk_count": sum(1 for g in cat_groups.get(cat, []) if g.get("signal", {}).get("sentiment") == "risk"),
+                "positive_count": sum(1 for g in cat_groups.get(cat, []) if g.get("signal", {}).get("sentiment") == "positive"),
+            }
+            for cat in CATEGORY_ORDER
+        ]
         own_brand_note = (
             f"我方品牌是「{own_brand}」。关于我方品牌的负面信号才算「风险」，"
             f"需要重点提示；其他品牌（竞品）的负面信号代表竞品出现问题，"
@@ -1071,18 +1196,25 @@ def generate_ai_brief(cat_groups, competitor_matrix, own_brand=""):
             "不要假设任何品牌的好坏消息对'我们'意味着什么。"
         )
         prompt = (
-            "以下是VPN行业情报面板今天抓取到的跨类别重点条目（JSON），以及按品牌汇总的提及/风险/利好次数：\n\n"
+            "以下是VPN行业情报面板今天抓取到的跨类别重点条目（JSON），按品牌汇总的提及/风险/利好次数，"
+            "以及按分类（竞品动态/社交媒体/reddit讨论/政策风险/第三方网站）汇总的统计：\n\n"
             f"条目（stance字段含义：self_*=我方品牌相关，competitor_*=竞品相关，"
             f"brand_*=未区分我方/竞品时的通用描述，general=无具体品牌）：\n"
             f"{json.dumps(all_top, ensure_ascii=False)}\n\n"
             f"品牌汇总：{json.dumps(brand_summary, ensure_ascii=False)}\n\n"
+            f"分类统计：{json.dumps(category_stats, ensure_ascii=False)}\n\n"
             f"{own_brand_note}\n\n"
-            "请写一份给团队看的「今日简报」，用中文，3-5句话，要求：\n"
-            "1. 第一句直接给出我方今天的整体风险等级判断（平稳/需关注/有预警信号）及理由\n"
-            "2. 点出今天最值得关注的1-3件具体事情，并明确说清楚这是「我方需关注的风险」"
-            "还是「竞品的动态（无论好坏，都不是我方风险）」\n"
-            "3. 语气客观、简洁，像是给团队主管的简报，不要输出运营建议或下一步行动\n"
-            "直接输出简报正文，不要标题、不要编号、不要多余说明。"
+            "请用中文写一份给团队看的「今日简报」，按以下结构输出，全程不要给出运营建议、"
+            "增长建议或下一步行动，只做客观信息归纳：\n\n"
+            "第一部分（1句话）：我方今天的整体风险等级判断（平稳/需关注/有预警信号）及理由。\n\n"
+            "第二部分（恰好5行，按 竞品动态/社交媒体/reddit讨论/政策风险/第三方网站 的顺序，"
+            "每个分类单独一行，格式固定为「分类名：一句话概括本分类今天在讲什么，"
+            "如果该分类没有数据就直接写'暂无有效信息'」。不要遗漏任何分类，"
+            "即使某分类数据很少也要给出对应的一行。\n\n"
+            "第三部分（0-2句话，仅在确有必要时才写）：跨分类的整体关联或最值得一提的信号，"
+            "并明确区分这是「我方需关注的风险」还是「竞品的动态（无论好坏，都不是我方风险）」。\n\n"
+            "直接输出正文，不要任何标题文字（不要写'第一部分'之类的标签），"
+            "分类那5行请保持清晰的换行，不要编号、不要多余说明。"
         )
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -1093,7 +1225,7 @@ def generate_ai_brief(cat_groups, competitor_matrix, own_brand=""):
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 350,
+                "max_tokens": 500,
                 "messages": [{"role": "user", "content": prompt}],
             },
             timeout=30,
@@ -1108,13 +1240,13 @@ def generate_ai_brief(cat_groups, competitor_matrix, own_brand=""):
 
 def generate_rule_based_brief(cat_groups, competitor_matrix, own_brand=""):
     """No-AI fallback brief. Stance-aware: only OUR brand's risk counts as
-    risk; competitors' negative news is framed as opportunity, not danger."""
+    risk; competitors' negative news is framed as opportunity, not danger.
+    Includes one Chinese summary line per category, as requested."""
     total_groups = sum(len(g) for g in cat_groups.values())
 
     if own_brand:
         own_row = next((m for m in competitor_matrix if m.get("is_own")), None)
         own_risk = own_row["risk_count"] if own_row else 0
-        own_positive = own_row["positive_count"] if own_row else 0
         competitor_rows = [m for m in competitor_matrix if not m.get("is_own") and m["risk_count"] > 0]
 
         if own_risk == 0:
@@ -1130,14 +1262,14 @@ def generate_rule_based_brief(cat_groups, competitor_matrix, own_brand=""):
         lines = [f"{level}：{level_text}"]
 
         if own_row and own_row.get("top_item") and own_risk > 0:
-            lines.append(f"· 我方代表事件：「{own_row['top_item']['title'][:40]}」")
+            top = own_row["top_item"]
+            topic = match_topic(top["title"] + " " + top.get("summary", ""), RISK_TOPIC_MAP, "负面信号")
+            lines.append(f"· 我方代表事件：{topic}（{top.get('category','')}）")
 
         if competitor_rows:
             top3 = sorted(competitor_rows, key=lambda m: m["risk_count"], reverse=True)[:3]
             names = "、".join(f"{m['brand']}({m['risk_count']}条)" for m in top3)
             lines.append(f"· 竞品方面：{names} 出现负面信号，对我方可能是获客/对比机会，非我方风险。")
-
-        lines.append(f"共抓取 {total_groups} 条已合并事件，覆盖 {len(competitor_matrix)} 个品牌。")
     else:
         # Fallback when no own_brand configured — purely descriptive, no "risk to us" framing
         total_negative = sum(m["risk_count"] for m in competitor_matrix)
@@ -1147,8 +1279,15 @@ def generate_rule_based_brief(cat_groups, competitor_matrix, own_brand=""):
         if competitor_matrix:
             top = competitor_matrix[0]
             lines.append(f"· 今日提及最多的品牌：{top['brand']}（{top['mentions']} 次）")
-        lines.append(f"共抓取 {total_groups} 条已合并事件，覆盖 {len(competitor_matrix)} 个品牌。"
-                     f"配置 config/own_brand.txt 后可获得「对我方意义」的判断。")
+
+    # Per-category breakdown — the part the user specifically asked for
+    lines.append("—— 分类速览 ——")
+    for cat in CATEGORY_ORDER:
+        lines.append(summarize_category_for_brief(cat, cat_groups.get(cat, [])))
+
+    lines.append(f"共抓取 {total_groups} 条已合并事件，覆盖 {len(competitor_matrix)} 个品牌。")
+    if not own_brand:
+        lines.append("配置 config/own_brand.txt 后可获得「对我方意义」的判断。")
 
     return {"text": "\n".join(lines), "method": "规则"}
 
@@ -1418,10 +1557,12 @@ def render_history_nav(mode="index", current_date=""):
         manifest_path = "manifest.json"
         nav_prefix    = ""
         back_link     = '<a href="../index.html" class="history-btn history-btn-secondary">↩ 返回今日最新</a>'
+        growth_link   = '<a href="../growth.html" class="history-btn history-btn-secondary">📈 增长信号周报</a>'
     else:
         manifest_path = "archive/manifest.json"
         nav_prefix    = "archive/"
         back_link     = ""
+        growth_link   = '<a href="growth.html" class="history-btn history-btn-secondary">📈 增长信号周报</a>'
 
     return f"""<div class="history-nav">
   <span class="history-label">📅 历史数据查询</span>
@@ -1430,6 +1571,7 @@ def render_history_nav(mode="index", current_date=""):
   </select>
   <button id="historyGoBtn" class="history-btn" type="button">查看</button>
   {back_link}
+  {growth_link}
 </div>
 <script>
 (function() {{
