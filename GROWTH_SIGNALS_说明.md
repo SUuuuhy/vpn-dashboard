@@ -15,13 +15,22 @@
 
 ---
 
-## 访问地址
+## 访问方式（单页面内切换，不是独立网页）
+
+**这是同一个网页里的一个标签页（Tab），不是单独的URL。**
 
 ```
-https://你的用户名.github.io/vpn-dashboard/growth.html
+https://你的用户名.github.io/vpn-dashboard/
 ```
 
-也可以从每日面板顶部「📅 历史数据查询」那一行旁边，点「📈 增长信号周报」直接跳转。
+打开后，页面顶部有两个切换按钮：
+
+```
+[📊 今日面板]  [📈 增长信号周报]
+```
+
+点「📈 增长信号周报」即可切换到这个板块，不会跳转页面。也支持直接用网址锚点
+深度链接到增长信号标签：`.../index.html#growth`（页面加载后会自动切到该标签）。
 
 ---
 
@@ -31,6 +40,25 @@ https://你的用户名.github.io/vpn-dashboard/growth.html
 判断"是否反复出现"本身就是个慢变量，没必要每天重算。
 
 也可以手动触发：仓库 → Actions → Weekly Growth Signals Report → Run workflow。
+
+---
+
+## 技术实现：两个脚本，一个网页
+
+由于每日面板（`scripts/update_dashboard.py`）和增长信号周报（`scripts/growth_signals.py`）
+运行在不同的时间表上（每天 vs 每周），但最终要呈现在同一个 `docs/index.html` 里，
+两者之间用一个"中间文件"做衔接：
+
+1. `scripts/growth_signals.py` 每周运行时，把分析结果渲染成一段HTML片段，
+   保存到 `docs/data/growth_fragment.html`（只是内容片段，不是完整网页）
+2. 同时，它会尝试直接把这段片段"嵌入"进当时已经生成好的 `docs/index.html`
+   （如果当时 index.html 还不存在，这一步会被跳过，不报错）
+3. `scripts/update_dashboard.py` 每天运行时，会读取 `docs/data/growth_fragment.html`
+   的内容嵌入到页面的"增长信号周报"标签里——这样即使是周二到周日的每日运行，
+   页面上看到的依然是上周一生成的最新增长报告，而不会因为今天没跑增长分析就消失
+
+这意味着：**周一当天，增长报告会立刻更新；周二到周日，页面上显示的是周一生成的
+那份报告，直到下周一被覆盖。**这是合理的，因为增长信号本来就是"慢变量"。
 
 ---
 

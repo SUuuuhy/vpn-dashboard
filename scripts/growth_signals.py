@@ -29,8 +29,8 @@ import update_dashboard as ud  # reuse: contains_keyword, read_own_brand, now_sg
 
 ARCHIVE_DIR = Path("docs/archive")
 DATA_DIR    = Path("docs/data")
-OUTPUT_HTML = Path("docs/growth.html")
-OUTPUT_JSON = Path("docs/data/growth.json")
+OUTPUT_FRAGMENT = Path("docs/data/growth_fragment.html")
+OUTPUT_JSON     = Path("docs/data/growth.json")
 
 WINDOW_DAYS = int(os.environ.get("WINDOW_DAYS", "30"))
 PERSISTENT_THRESHOLD = 3  # distinct days within window to count as "持续信号"
@@ -138,7 +138,7 @@ def build_buckets(days, own_brand):
                     continue
 
                 item = {
-                    "date": date_str, "title": title, "category": cat,
+                    "date": date_str, "title": title, "summary": summary, "category": cat,
                     "brands": brands, "url": url, "source_count": src_count,
                 }
 
@@ -217,12 +217,18 @@ def render_topic_card(entry, color):
         brand_str = "、".join(it["brands"]) if it["brands"] else "—"
         link = (f'<a href="{it["url"]}" target="_blank" rel="noopener">{it["url"][:55]}'
                 f'{"…" if len(it["url"]) > 55 else ""}</a>') if it["url"] else "无链接"
+        gist_zh = ud.describe_text_zh(it["title"], it.get("summary", ""), it["brands"])
         items_html += f"""<div class="eg-item">
-  <span class="eg-date">{it['date']}</span>
-  <span class="eg-brand">{brand_str}</span>
-  <span class="eg-cat">{it['category']}</span>
-  <span class="eg-title">{it['title'][:70]}</span>
-  <span class="eg-link">{link}</span>
+  <div class="eg-item-main">
+    <span class="eg-date">{it['date']}</span>
+    <span class="eg-brand">{brand_str}</span>
+    <span class="eg-cat">{it['category']}</span>
+    <span class="eg-gist">{gist_zh}</span>
+  </div>
+  <div class="eg-item-detail">
+    <span class="eg-title-original">原标题：{it['title'][:80]}</span>
+    <span class="eg-link">{link}</span>
+  </div>
 </div>"""
 
     return f"""<div class="topic-card" style="border-left-color:{color}">
@@ -256,7 +262,14 @@ def render_bucket_section(bucket_key, entries):
 </section>"""
 
 
-def render_html(buckets_final, own_brand, days, latest_date):
+def render_growth_fragment(buckets_final, own_brand, days, latest_date):
+    """
+    Renders ONLY the inner content for the growth tab — no <html>/<head>/
+    <style> wrapper. This gets embedded into the shared docs/index.html
+    (which already carries all the necessary CSS classes), so the growth
+    report lives as a tab inside the single combined page rather than a
+    separate HTML document.
+    """
     window_desc = (
         f"过去 {len(days)} 天（{days[0][0]} 至 {days[-1][0]}）"
         if days else "暂无归档数据"
@@ -271,122 +284,57 @@ def render_html(buckets_final, own_brand, days, latest_date):
         for key in ["self", "feature_gap", "content"]
     )
 
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>增长信号周报</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>
-:root {{
-  --bg: #F5F7FC; --surface: #FFFFFF; --surface2: #EEF1F9; --border: #E3E7F2;
-  --text: #0B1220; --text2: #4B5568; --text3: #94A0B8;
-  --accent: #2F5DFF; --accent2: #7C3AED;
-  --shadow-sm: 0 1px 2px rgba(15,23,42,0.05); --shadow-md: 0 4px 16px rgba(15,23,42,0.07);
-}}
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-       background: var(--bg); color: var(--text); line-height: 1.6; }}
-a {{ color: var(--accent); text-decoration: none; }}
-a:hover {{ text-decoration: underline; }}
-.container {{ max-width: 1200px; margin: 0 auto; padding: 24px 16px; }}
-
-.page-header {{
-  background: linear-gradient(135deg, #2F5DFF 0%, #7C3AED 100%);
-  border-radius: 20px; padding: 26px; margin-bottom: 22px; box-shadow: var(--shadow-md);
-}}
-.page-title {{ font-size: 1.5rem; font-weight: 800; color: #fff; margin-bottom: 6px; }}
-.page-subtitle {{ color: rgba(255,255,255,0.85); font-size: 0.85rem; margin-bottom: 4px; }}
-.page-meta {{ color: rgba(255,255,255,0.7); font-size: 0.78rem; }}
-.back-link {{
-  display: inline-block; margin-top: 14px; background: rgba(255,255,255,0.18);
-  color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
-  padding: 6px 16px; font-size: 0.8rem; font-weight: 600;
-}}
-.back-link:hover {{ background: rgba(255,255,255,0.28); text-decoration: none; }}
-
-.method-note {{
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-  padding: 14px 18px; margin-bottom: 22px; font-size: 0.8rem; color: var(--text3);
-  line-height: 1.7; box-shadow: var(--shadow-sm);
-}}
-
-.bucket-section {{ margin-bottom: 32px; }}
-.bucket-header {{
-  display: flex; align-items: center; gap: 10px;
-  border-left: 4px solid; padding-left: 12px; margin-bottom: 8px;
-}}
-.bucket-icon {{ font-size: 1.3rem; }}
-.bucket-title {{ font-size: 1.15rem; font-weight: 800; flex: 1; color: var(--text); }}
-.bucket-count {{ font-size: 0.75rem; font-weight: 700; color: #fff;
-                 border-radius: 999px; padding: 2px 12px; }}
-.bucket-desc {{ font-size: 0.8rem; color: var(--text3); margin: 0 0 16px 4px; line-height: 1.6; }}
-
-.topics-grid {{
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 16px; align-items: start;
-}}
-.empty-bucket {{ color: var(--text3); font-size: 0.85rem; padding: 20px;
-                 background: var(--surface); border: 1px solid var(--border);
-                 border-radius: 14px; grid-column: 1 / -1; }}
-
-.topic-card {{
-  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid;
-  border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow-sm);
-}}
-.topic-header {{ display: flex; justify-content: space-between; align-items: flex-start;
-                 gap: 8px; margin-bottom: 8px; }}
-.topic-name {{ font-size: 1rem; font-weight: 700; color: var(--text); }}
-.strength-badge {{ font-size: 0.68rem; font-weight: 700; border-radius: 6px;
-                   padding: 3px 9px; white-space: nowrap; }}
-.strength-persistent {{ background: #FEF2F2; color: #DC2626; }}
-.strength-emerging {{ background: #FFFBEB; color: #D97706; }}
-.topic-meta {{ font-size: 0.78rem; color: var(--text3); margin-bottom: 10px; }}
-
-.topic-details summary {{ font-size: 0.8rem; color: var(--text3); cursor: pointer;
-                          list-style: none; padding: 4px 0; }}
-.topic-details summary::-webkit-details-marker {{ display:none; }}
-.topic-details[open] summary {{ color: var(--text2); }}
-.eg-list {{ margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
-            max-height: 320px; overflow-y: auto; padding-right: 4px; }}
-.eg-item {{ background: var(--bg); border-radius: 8px; padding: 8px 10px;
-            font-size: 0.76rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
-.eg-date {{ color: var(--text3); white-space: nowrap; font-weight: 600; }}
-.eg-brand {{ color: var(--accent); font-weight: 600; }}
-.eg-cat {{ color: var(--text3); background: var(--surface2); border-radius: 4px; padding: 0 6px; }}
-.eg-title {{ color: var(--text2); flex: 1; min-width: 100px; }}
-.eg-link {{ word-break: break-all; }}
-
-@media (max-width: 600px) {{
-  .topics-grid {{ grid-template-columns: 1fr; }}
-}}
-</style>
-</head>
-<body>
-<div class="container">
-
-<div class="page-header">
-  <div class="page-title">📈 增长信号周报</div>
-  <div class="page-subtitle">Growth Signals — 跨{WINDOW_DAYS}天聚合，关键词主题聚类</div>
-  <div class="page-meta">分析窗口：{window_desc} ｜ {own_brand_note}</div>
-  <a href="index.html" class="back-link">↩ 返回每日面板</a>
-</div>
-
-<div class="method-note">
-💡 <strong>这是什么：</strong>每周运行一次，把过去最多{WINDOW_DAYS}天的归档数据按关键词主题做聚类，
+    return f"""<div class="method-note">
+📈 <strong>增长信号周报</strong> — 跨{WINDOW_DAYS}天聚合，关键词主题聚类，每周一自动更新一次。<br>
+分析窗口：{window_desc} ｜ {own_brand_note}<br>
+💡 <strong>这是什么：</strong>把过去最多{WINDOW_DAYS}天的归档数据按关键词主题做聚类，
 找出"反复出现"的话题/抱怨/需求。<strong>不做机会打分，不给运营建议</strong>——只是把聚类后的原始信号
 按出现天数排序列出来，你自己判断要不要跟进。🔥持续信号 = 在{PERSISTENT_THRESHOLD}个或以上不同日期出现过；
 💡观察中 = 出现次数还不够多，可能是噪音也可能是刚冒头的新趋势，仅供参考。
 </div>
 
-{sections_html}
+{sections_html}"""
 
-</div>
-</body>
-</html>
-"""
+
+def splice_into_index_html(fragment_html):
+    """
+    Inject the freshly rendered growth fragment into the already-generated
+    docs/index.html (produced moments earlier in the same workflow run by
+    update_dashboard.py), by replacing the content between the
+    GROWTH_TAB_CONTENT marker comments. This makes the merged single-page
+    site reflect the new growth report immediately, rather than waiting
+    for tomorrow's daily run to pick up docs/data/growth_fragment.html.
+
+    If docs/index.html doesn't exist yet (shouldn't normally happen — the
+    weekly workflow runs update_dashboard.py first), this is a no-op;
+    the fragment file alone will still be picked up on the next daily run.
+    """
+    index_path = Path("docs/index.html")
+    if not index_path.exists():
+        print("docs/index.html not found — skipping splice; "
+              "next daily run will pick up the saved fragment instead.")
+        return False
+
+    html = index_path.read_text(encoding="utf-8")
+    start_marker = "<!-- GROWTH_TAB_CONTENT_START -->"
+    end_marker   = "<!-- GROWTH_TAB_CONTENT_END -->"
+
+    start_idx = html.find(start_marker)
+    end_idx   = html.find(end_marker)
+    if start_idx == -1 or end_idx == -1 or end_idx < start_idx:
+        print("Growth tab markers not found in docs/index.html — skipping splice "
+              "(this index.html may have been generated by an older version of "
+              "update_dashboard.py without tab support).")
+        return False
+
+    new_html = (
+        html[: start_idx + len(start_marker)]
+        + "\n" + fragment_html + "\n"
+        + html[end_idx:]
+    )
+    index_path.write_text(new_html, encoding="utf-8")
+    print("Spliced fresh growth content into docs/index.html ✅")
+    return True
 
 
 def main():
@@ -398,39 +346,33 @@ def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not days:
-        print("No archive data available yet — writing placeholder growth report.")
+        print("No archive data available yet — writing placeholder growth fragment.")
         buckets_final = {"self": [], "feature_gap": [], "content": []}
-        html = render_html(buckets_final, own_brand, [], None)
-        OUTPUT_HTML.write_text(html, encoding="utf-8")
-        OUTPUT_JSON.write_text(json.dumps({
-            "generated_at": ud.now_sgt().isoformat(),
-            "window_days": WINDOW_DAYS,
-            "own_brand": own_brand,
-            "days_analyzed": 0,
-            "buckets": buckets_final,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
-        return
+        fragment = render_growth_fragment(buckets_final, own_brand, [], None)
+    else:
+        latest_date = days[-1][0]
+        buckets_raw = build_buckets(days, own_brand)
+        buckets_final = {key: finalize_bucket(buckets_raw[key]) for key in buckets_raw}
+        for key, entries in buckets_final.items():
+            print(f"  [{key}] {len(entries)} topic(s) found")
+        fragment = render_growth_fragment(buckets_final, own_brand, days, latest_date)
 
-    latest_date = days[-1][0]
-    buckets_raw = build_buckets(days, own_brand)
-    buckets_final = {key: finalize_bucket(buckets_raw[key]) for key in buckets_raw}
-
-    for key, entries in buckets_final.items():
-        print(f"  [{key}] {len(entries)} topic(s) found")
-
-    html = render_html(buckets_final, own_brand, days, latest_date)
-    OUTPUT_HTML.write_text(html, encoding="utf-8")
-    print(f"HTML written: {OUTPUT_HTML}")
+    OUTPUT_FRAGMENT.write_text(fragment, encoding="utf-8")
+    print(f"Fragment written: {OUTPUT_FRAGMENT}")
 
     OUTPUT_JSON.write_text(json.dumps({
         "generated_at": ud.now_sgt().isoformat(),
         "window_days": WINDOW_DAYS,
         "own_brand": own_brand,
         "days_analyzed": len(days),
-        "date_range": [days[0][0], days[-1][0]],
+        "date_range": [days[0][0], days[-1][0]] if days else None,
         "buckets": buckets_final,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"JSON written: {OUTPUT_JSON}")
+
+    # Immediately merge into the single combined page, rather than waiting
+    # for tomorrow's daily run to pick up the saved fragment.
+    splice_into_index_html(fragment)
 
 
 if __name__ == "__main__":

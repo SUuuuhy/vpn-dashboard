@@ -82,12 +82,14 @@ jobs:
           pip install -r requirements.txt
           echo "Dependencies installed ✅"
 
-      # ── 5. Restore archive history from live Pages site ──
+      # ── 5. Restore archive + growth history from live Pages site ──
       - name: Restore archive history
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          echo "=== Restoring docs/archive/ history from Pages (no git commit needed) ==="
+          echo "=== Restoring docs/archive/ + docs/data/growth_fragment.html from Pages ==="
+          echo "(no git commit needed; also keeps last week's growth tab content visible"
+          echo " on daily runs in between weekly growth-signal runs)"
           python scripts/restore_archive.py
           echo "Restore step done (failures here are non-fatal by design)"
 

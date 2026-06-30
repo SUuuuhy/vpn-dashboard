@@ -55,30 +55,34 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Restore archive history from live Pages site
+      - name: Restore history from live Pages site
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          echo "=== Restoring docs/archive/ history (needed for 30-day trend analysis) ==="
+          echo "=== Restoring docs/archive/ + docs/data/ history (needed for 30-day trend analysis) ==="
           python scripts/restore_archive.py
 
+      # ── Growth signals MUST run before the daily regen step below ──
+      # It writes docs/data/growth_fragment.html + growth.json. If
+      # docs/index.html doesn't exist yet at this point (normal — the daily
+      # script hasn't run yet this session), the splice step harmlessly
+      # skips itself; update_dashboard.py picks up the fresh fragment file
+      # from disk a moment later regardless, so the final index.html still
+      # ends up correct either way.
       - name: Generate growth signals report
         env:
           WINDOW_DAYS: ${{ github.event.inputs.window_days || '30' }}
         run: |
           echo "=== Generating 增长信号周报 (window=${WINDOW_DAYS} days) ==="
           python scripts/growth_signals.py
-          echo "Growth report generated ✅"
+          echo "Growth signals fragment generated ✅"
 
-      - name: Verify output
-        run: |
-          if [ ! -f "docs/growth.html" ]; then
-            echo "❌ docs/growth.html not found"
-            exit 1
-          fi
-          echo "✅ docs/growth.html exists ($(wc -c < docs/growth.html) bytes)"
-
-      - name: Regenerate today's daily dashboard too
+      # ── Regenerate the combined single-page dashboard ──
+      # This embeds the growth fragment just written above into the same
+      # docs/index.html that the daily workflow also produces — there is
+      # only ONE live page, with the daily content and growth report as
+      # two tabs inside it.
+      - name: Regenerate combined dashboard (daily tab + growth tab)
         env:
           SKIP_NETWORK: 'false'
           LOOKBACK_HOURS: '48'
@@ -88,12 +92,23 @@ jobs:
           REDDIT_USER_AGENT:    ${{ secrets.REDDIT_USER_AGENT }}
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # This keeps docs/index.html consistent with whatever is already live
-          # (rather than deploying a stale index.html alongside a fresh growth.html).
-          # If this step fails for any reason, we still proceed to deploy
-          # growth.html — a stale index.html is not a reason to block the
-          # growth report from shipping.
-          python scripts/update_dashboard.py --lookback-hours "${LOOKBACK_HOURS}" || echo "⚠️ daily regen failed, continuing with growth.html deploy anyway"
+          python scripts/update_dashboard.py --lookback-hours "${LOOKBACK_HOURS}"
+          echo "Combined dashboard regenerated ✅"
+
+      - name: Verify output files
+        run: |
+          echo "=== Verifying output ==="
+          if [ ! -f "docs/index.html" ]; then
+            echo "❌ docs/index.html not found — this would publish a broken site, aborting."
+            exit 1
+          fi
+          echo "✅ docs/index.html exists ($(wc -c < docs/index.html) bytes)"
+
+          if [ -f "docs/data/growth_fragment.html" ]; then
+            echo "✅ docs/data/growth_fragment.html exists ($(wc -c < docs/data/growth_fragment.html) bytes)"
+          else
+            echo "⚠️ growth_fragment.html missing — growth tab will show placeholder, not blocking deploy"
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

@@ -100,6 +100,41 @@ def main():
     print(f"Archive restore complete: {restored} restored, {skipped} already present, "
           f"{failed} failed (out of {len(manifest)} dates in manifest).")
 
+    restore_growth_fragment(base)
+
+
+def restore_growth_fragment(base):
+    """
+    The weekly growth-signals run writes docs/data/growth_fragment.html and
+    docs/data/growth.json, then splices the fragment into docs/index.html
+    directly. But the DAILY run (which happens on the other 6 days of the
+    week) starts from a fresh checkout with neither file present, so its
+    freshly-regenerated index.html would fall back to the "尚未生成" placeholder
+    and silently erase last week's growth report from the live site.
+
+    Restoring these two files here means every daily run keeps showing the
+    most recent weekly growth report until the next Monday run replaces it.
+    """
+    data_dir = Path("docs/data")
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    for fname in ("growth_fragment.html", "growth.json"):
+        local_path = data_dir / fname
+        if local_path.exists():
+            continue
+        url = f"{base}data/{fname}"
+        try:
+            resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+            if resp.status_code == 200:
+                local_path.write_bytes(resp.content)
+                print(f"Restored {fname} from live site.")
+            else:
+                print(f"No existing {fname} on live site yet (HTTP {resp.status_code}) "
+                      f"— expected before the first weekly growth run.")
+        except Exception as e:
+            print(f"Could not restore {fname}: {e} — non-fatal, daily run will show "
+                  f"the 'not generated yet' placeholder instead.")
+
 
 if __name__ == "__main__":
     main()

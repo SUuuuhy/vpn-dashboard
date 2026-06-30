@@ -1082,6 +1082,32 @@ def describe_group_zh(g):
         return f"{brand_str}：{topic}{src_tag}"
     return f"{topic}{src_tag}"
 
+def describe_text_zh(title, summary="", brands=None):
+    """
+    Per-article Chinese gist — same idea as describe_group_zh but works on
+    a single raw title+summary pair (no merged-group/signal structure
+    required). Used to give every individual source link a quick Chinese
+    one-liner instead of leaving the (often English) original title as the
+    only visible text.
+    """
+    text = f"{title} {summary or ''}"
+    if brands is None:
+        brands = detect_brands(text)
+    brand_str = "、".join(brands) if brands else ""
+
+    text_l = text.lower()
+    risk_hits = sum(1 for w in RISK_SIGNAL_WORDS if contains_keyword(text_l, w))
+    pos_hits  = sum(1 for w in POSITIVE_SIGNAL_WORDS if contains_keyword(text_l, w))
+
+    if risk_hits > pos_hits and risk_hits > 0:
+        topic = match_topic(text, RISK_TOPIC_MAP, "相关负面动态")
+    elif pos_hits > risk_hits and pos_hits > 0:
+        topic = match_topic(text, POSITIVE_TOPIC_MAP, "相关正面动态")
+    else:
+        topic = "相关信息"
+
+    return f"{brand_str}：{topic}" if brand_str else topic
+
 def generate_rule_based_highlights(cat, groups):
     """No-AI fallback: produces genuine Chinese summary sentences built from
     structured signals (brand/topic/source-count), not raw (often English)
@@ -1491,12 +1517,18 @@ def render_source_tag(art: Article):
     link_html = f'<a href="{art.url}" target="_blank" rel="noopener">{art.url[:60]}{"…" if len(art.url)>60 else ""}</a>' if art.url else "无链接"
     time_str  = fmt_dt(art.published_dt)
     age_str   = age_label(art.published_dt)
+    gist_zh   = describe_text_zh(art.title, art.summary)
     return f"""<div class="source-item">
-  <span class="source-name">{art.source_name}</span>
-  <span class="source-type">{art.source_type}</span>
-  <span class="source-title">《{art.title[:80]}》</span>
-  <span class="source-time">{time_str}（{age_str}）</span>
-  <span class="source-link">{link_html}</span>
+  <div class="source-item-main">
+    <span class="source-name">{art.source_name}</span>
+    <span class="source-type">{art.source_type}</span>
+    <span class="source-gist">{gist_zh}</span>
+    <span class="source-time">{time_str}（{age_str}）</span>
+  </div>
+  <div class="source-item-detail">
+    <span class="source-title-original">原标题：{art.title[:90]}</span>
+    <span class="source-link">{link_html}</span>
+  </div>
 </div>"""
 
 def render_group_card(group, cat):
@@ -1557,12 +1589,12 @@ def render_history_nav(mode="index", current_date=""):
         manifest_path = "manifest.json"
         nav_prefix    = ""
         back_link     = '<a href="../index.html" class="history-btn history-btn-secondary">↩ 返回今日最新</a>'
-        growth_link   = '<a href="../growth.html" class="history-btn history-btn-secondary">📈 增长信号周报</a>'
     else:
         manifest_path = "archive/manifest.json"
         nav_prefix    = "archive/"
         back_link     = ""
-        growth_link   = '<a href="growth.html" class="history-btn history-btn-secondary">📈 增长信号周报</a>'
+
+    growth_link = '<button type="button" class="history-btn history-btn-secondary" onclick="switchTab(\'growth\')">📈 增长信号周报</button>'
 
     return f"""<div class="history-nav">
   <span class="history-label">📅 历史数据查询</span>
@@ -1612,6 +1644,30 @@ def render_history_nav(mode="index", current_date=""):
   }});
 }})();
 </script>"""
+
+GROWTH_FRAGMENT_PATH = Path("docs/data/growth_fragment.html")
+
+def load_growth_tab_html():
+    """
+    Loads the growth-signals tab content from docs/data/growth_fragment.html
+    if it exists (written by scripts/growth_signals.py, which runs weekly
+    on a separate schedule). Falls back to a placeholder when no growth
+    report has been generated yet (e.g. before the first Monday run, or if
+    restore_archive.py couldn't fetch it from a prior deployment).
+    """
+    try:
+        if GROWTH_FRAGMENT_PATH.exists():
+            content = GROWTH_FRAGMENT_PATH.read_text(encoding="utf-8")
+            if content.strip():
+                return content
+    except Exception as e:
+        log.warning(f"Could not read growth fragment: {e}")
+
+    return """<div class="method-note">
+📈 <strong>增长信号周报尚未生成。</strong>这个模块每周一自动运行一次，
+首次运行后这里会显示按关键词主题聚类的「产品功能缺口 / 内容营销角度 / 自身体验问题」分析。
+也可以去 Actions → Weekly Growth Signals Report → Run workflow 手动触发一次。
+</div>"""
 
 def render_html(data, mode="index", current_date=""):
     stats     = data["stats"]
@@ -1839,6 +1895,7 @@ def render_html(data, mode="index", current_date=""):
     total_win  = stats["in_window"]
     window_str = f"最近 {stats['lookback_hours']}h（+{stats['grace_hours']}h 时区宽限）"
     history_nav_html = render_history_nav(mode=mode, current_date=current_date)
+    growth_tab_html  = load_growth_tab_html()
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2003,21 +2060,32 @@ a:hover {{ text-decoration: underline; }}
 .delta-down {{ background: #FEF2F2; color: #DC2626; }}
 .delta-flat {{ background: var(--surface2); color: var(--text3); }}
 
-/* Sections grid — auto-adapts to 1/2/3 columns depending on viewport width,
-   so widescreen viewing isn't wasted on a single long vertical column. */
+/* Sections "masonry" — CSS multi-column flow instead of CSS Grid.
+   Grid forces every item in a row to match the tallest row-mate's height
+   (even with align-items:start, the grid ROW itself is sized to the tallest
+   cell, leaving visible empty space inside shorter cells). Multi-column
+   layout has no such row constraint — each column just stacks items by
+   their own height, so a category with 1 item and a category with 8 items
+   sitting side-by-side no longer leaves a big blank gap under the short one. */
 .sections-grid {{
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-  gap: 20px;
-  align-items: start;
+  column-count: 1;
+  column-gap: 20px;
+}}
+@media (min-width: 760px) {{
+  .sections-grid {{ column-count: 2; }}
+}}
+@media (min-width: 1180px) {{
+  .sections-grid {{ column-count: 3; }}
 }}
 
 /* Category sections — each is now a self-contained panel (card) so it
    reads cleanly as a column/tile when sitting next to its siblings. */
 .category-section {{
-  margin-bottom: 0; scroll-margin-top: 16px;
+  break-inside: avoid; -webkit-column-break-inside: avoid;
+  margin: 0 0 20px 0; scroll-margin-top: 16px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 18px; padding: 18px 20px; box-shadow: var(--shadow-sm);
+  display: inline-block; width: 100%;
 }}
 .category-header {{
   display: flex; align-items: center; gap: 10px;
@@ -2100,12 +2168,18 @@ a:hover {{ text-decoration: underline; }}
 .sources-list {{ margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }}
 .source-item {{
   background: var(--bg); border-radius: 8px; padding: 8px 10px;
-  font-size: 0.78rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+  font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;
 }}
+.source-item-main {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
 .source-name {{ font-weight: 700; color: var(--accent); }}
 .source-type {{ color: var(--text3); background: var(--surface2); border-radius: 4px; padding: 0 6px; }}
-.source-title {{ color: var(--text2); flex: 1; min-width: 100px; }}
+.source-gist {{ color: var(--text); font-weight: 600; flex: 1; min-width: 100px; }}
 .source-time {{ color: var(--text3); white-space: nowrap; }}
+.source-item-detail {{
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+  font-size: 0.72rem; color: var(--text3); padding-left: 2px;
+}}
+.source-title-original {{ flex: 1; min-width: 100px; }}
 .source-link {{ word-break: break-all; }}
 
 /* Collapsed sections */
@@ -2132,6 +2206,84 @@ a:hover {{ text-decoration: underline; }}
 .collapsed-zone-title {{ font-size: 0.8rem; color: var(--text3);
   text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; font-weight: 700; }}
 
+/* Tab switcher — single-page experience between 今日面板 and 增长信号周报 */
+.tab-switcher {{
+  display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;
+}}
+.tab-btn {{
+  background: var(--surface); color: var(--text2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 9px 20px; font-size: 0.88rem; font-weight: 700;
+  cursor: pointer; box-shadow: var(--shadow-sm); transition: all .15s;
+  font-family: inherit;
+}}
+.tab-btn:hover {{ box-shadow: var(--shadow-md); }}
+.tab-btn.active {{
+  background: linear-gradient(135deg, #2F5DFF 0%, #7C3AED 100%); color: #fff; border-color: transparent;
+}}
+.tab-panel {{ display: none; }}
+.tab-panel.active {{ display: block; }}
+
+/* Growth signals tab content (ported from the standalone growth.html page) */
+.method-note {{
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px 18px; margin-bottom: 22px; font-size: 0.8rem; color: var(--text3);
+  line-height: 1.7; box-shadow: var(--shadow-sm);
+}}
+.growth-meta {{
+  font-size: 0.78rem; color: var(--text3); margin-bottom: 16px;
+}}
+.bucket-section {{ margin-bottom: 32px; }}
+.bucket-header {{
+  display: flex; align-items: center; gap: 10px;
+  border-left: 4px solid; padding-left: 12px; margin-bottom: 8px;
+}}
+.bucket-icon {{ font-size: 1.3rem; }}
+.bucket-title {{ font-size: 1.15rem; font-weight: 800; flex: 1; color: var(--text); }}
+.bucket-count {{ font-size: 0.75rem; font-weight: 700; color: #fff;
+                 border-radius: 999px; padding: 2px 12px; }}
+.bucket-desc {{ font-size: 0.8rem; color: var(--text3); margin: 0 0 16px 4px; line-height: 1.6; }}
+.topics-grid {{
+  column-count: 1; column-gap: 16px;
+}}
+@media (min-width: 700px) {{ .topics-grid {{ column-count: 2; }} }}
+@media (min-width: 1100px) {{ .topics-grid {{ column-count: 3; }} }}
+.empty-bucket {{ color: var(--text3); font-size: 0.85rem; padding: 20px;
+                 background: var(--surface); border: 1px solid var(--border);
+                 border-radius: 14px; }}
+.topic-card {{
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid;
+  border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow-sm);
+  break-inside: avoid; -webkit-column-break-inside: avoid;
+  display: inline-block; width: 100%; margin: 0 0 16px 0;
+}}
+.topic-header {{ display: flex; justify-content: space-between; align-items: flex-start;
+                 gap: 8px; margin-bottom: 8px; }}
+.topic-name {{ font-size: 1rem; font-weight: 700; color: var(--text); }}
+.strength-badge {{ font-size: 0.68rem; font-weight: 700; border-radius: 6px;
+                   padding: 3px 9px; white-space: nowrap; }}
+.strength-persistent {{ background: #FEF2F2; color: #DC2626; }}
+.strength-emerging {{ background: #FFFBEB; color: #D97706; }}
+.topic-meta {{ font-size: 0.78rem; color: var(--text3); margin-bottom: 10px; }}
+.topic-details summary {{ font-size: 0.8rem; color: var(--text3); cursor: pointer;
+                          list-style: none; padding: 4px 0; }}
+.topic-details summary::-webkit-details-marker {{ display:none; }}
+.topic-details[open] summary {{ color: var(--text2); }}
+.eg-list {{ margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+            max-height: 320px; overflow-y: auto; padding-right: 4px; }}
+.eg-item {{ background: var(--bg); border-radius: 8px; padding: 8px 10px;
+            font-size: 0.76rem; display: flex; flex-direction: column; gap: 4px; }}
+.eg-item-main {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
+.eg-date {{ color: var(--text3); white-space: nowrap; font-weight: 600; }}
+.eg-brand {{ color: var(--accent); font-weight: 600; }}
+.eg-cat {{ color: var(--text3); background: var(--surface2); border-radius: 4px; padding: 0 6px; }}
+.eg-gist {{ color: var(--text); font-weight: 600; flex: 1; min-width: 100px; }}
+.eg-item-detail {{
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+  font-size: 0.7rem; color: var(--text3); padding-left: 2px;
+}}
+.eg-title-original {{ flex: 1; min-width: 100px; }}
+.eg-link {{ word-break: break-all; }}
+
 @media (max-width: 600px) {{
   .meta-grid {{ grid-template-columns: 1fr 1fr; }}
   .card-header {{ flex-direction: column; }}
@@ -2143,7 +2295,7 @@ a:hover {{ text-decoration: underline; }}
 
 <!-- HEADER -->
 <div class="panel-header">
-  <div class="panel-title">📡 VPN 行业情报日报</div>
+  <div class="panel-title">📡 VPN 行业情报面板</div>
   <div class="panel-subtitle">Daily VPN Industry Intelligence Panel</div>
   <div class="meta-grid">
     <div class="meta-item"><div class="meta-label">更新时间</div><div class="meta-value">{run_time}</div></div>
@@ -2155,6 +2307,15 @@ a:hover {{ text-decoration: underline; }}
     <div class="meta-item"><div class="meta-label">已过滤</div><div class="meta-value">时效外 {stats['too_old']} + 时间不明 {stats['no_time']}</div></div>
   </div>
 </div>
+
+<!-- TAB SWITCHER -->
+<div class="tab-switcher">
+  <button class="tab-btn active" data-tab="daily" onclick="switchTab('daily')">📊 今日面板</button>
+  <button class="tab-btn" data-tab="growth" onclick="switchTab('growth')">📈 增长信号周报</button>
+</div>
+
+<!-- ══════════════ TAB: 今日面板 ══════════════ -->
+<div id="tab-daily" class="tab-panel active">
 
 <!-- HISTORY NAV -->
 {history_nav_html}
@@ -2184,7 +2345,31 @@ a:hover {{ text-decoration: underline; }}
 {reddit_diag}
 </div>
 
+</div><!-- /tab-daily -->
+
+<!-- ══════════════ TAB: 增长信号周报 ══════════════ -->
+<div id="tab-growth" class="tab-panel">
+<!-- GROWTH_TAB_CONTENT_START -->
+{growth_tab_html}
+<!-- GROWTH_TAB_CONTENT_END -->
+</div><!-- /tab-growth -->
+
 </div><!-- /container -->
+
+<script>
+function switchTab(name) {{
+  document.querySelectorAll('.tab-panel').forEach(function(p) {{ p.classList.remove('active'); }});
+  document.querySelectorAll('.tab-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelector('.tab-btn[data-tab="' + name + '"]').classList.add('active');
+  if (history.replaceState) {{ history.replaceState(null, '', '#' + name); }}
+}}
+(function() {{
+  var hash = window.location.hash.replace('#', '');
+  if (hash === 'growth') {{ switchTab('growth'); }}
+}})();
+</script>
+
 </body>
 </html>
 """
