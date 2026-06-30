@@ -1,11 +1,11 @@
 {
   "stats": {
-    "run_time_sgt": "2026-06-29 18:22 SGT",
-    "run_time_iso": "2026-06-29T18:22:38.076424+08:00",
+    "run_time_sgt": "2026-06-29 18:55 SGT",
+    "run_time_iso": "2026-06-29T18:55:51.759216+08:00",
     "timezone": "Asia/Singapore (SGT, UTC+8)",
     "lookback_hours": 48,
     "grace_hours": 12,
-    "total_sources": 40,
+    "total_sources": 52,
     "fetch_success": 0,
     "fetch_failed": 0,
     "total_raw": 0,

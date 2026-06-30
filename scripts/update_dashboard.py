@@ -459,13 +459,27 @@ def fetch_reddit(source_name, subreddit_url, category):
         return result
     subreddit = m.group(1)
 
-    methods = [
-        ("OAuth",     lambda: fetch_reddit_oauth(subreddit, source_name, category)),
-        ("PublicJSON", lambda: fetch_reddit_json(subreddit, source_name, category)),
-        ("RSS",        lambda: fetch_reddit_rss(subreddit, source_name, category)),
-        ("old.reddit", lambda: fetch_old_reddit(subreddit, source_name, category)),
-        ("Jina",       lambda: fetch_jina_reddit(subreddit, source_name, category)),
-    ]
+    # NOTE (2026): Reddit's "Responsible Builder Policy" rollout has largely
+    # gated self-serve script-app creation and tightened unauthenticated JSON
+    # access. RSS (.rss suffix) remains the most reliable no-auth path, so it
+    # is tried first. OAuth is only attempted first if credentials are present
+    # (i.e. the user successfully obtained them), since it's the most complete
+    # data source when available.
+    if REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET:
+        methods = [
+            ("OAuth",      lambda: fetch_reddit_oauth(subreddit, source_name, category)),
+            ("RSS",        lambda: fetch_reddit_rss(subreddit, source_name, category)),
+            ("old.reddit", lambda: fetch_old_reddit(subreddit, source_name, category)),
+            ("PublicJSON", lambda: fetch_reddit_json(subreddit, source_name, category)),
+            ("Jina",       lambda: fetch_jina_reddit(subreddit, source_name, category)),
+        ]
+    else:
+        methods = [
+            ("RSS",        lambda: fetch_reddit_rss(subreddit, source_name, category)),
+            ("old.reddit", lambda: fetch_old_reddit(subreddit, source_name, category)),
+            ("PublicJSON", lambda: fetch_reddit_json(subreddit, source_name, category)),
+            ("Jina",       lambda: fetch_jina_reddit(subreddit, source_name, category)),
+        ]
 
     errors = []
     for method_name, fn in methods:
@@ -488,9 +502,9 @@ def fetch_reddit(source_name, subreddit_url, category):
     result.note  = "所有方式均失败"
     diagnosis = []
     if not REDDIT_CLIENT_ID:
-        diagnosis.append("未配置 REDDIT_CLIENT_ID/SECRET（OAuth不可用）")
+        diagnosis.append("未配置OAuth（2026年起Reddit已大幅限制自助创建App，未配置属正常情况，不影响RSS等兜底方式）")
     diagnosis.append("可能被限流或GitHub Actions IP被封")
-    diagnosis.append("User-Agent可能不合规")
+    diagnosis.append("该 subreddit 可能临时不可访问或改名")
     result.note += "\n诊断建议: " + "; ".join(diagnosis)
     return result
 
@@ -758,6 +772,35 @@ CATEGORY_COLORS = {
     "第三方网站": "#059669",
 }
 
+CATEGORY_DESC = {
+    "竞品动态": (
+        "来源：竞品官网、官方博客、新闻室、产品更新页等官方渠道。"
+        "监控竞品产品发布、促销活动、功能上线、安全公告及官方声明。"
+        "仅限官方发布内容，媒体转载请见「第三方网站」板块。"
+    ),
+    "社交媒体": (
+        "来源：竞品官方 X/Twitter 等社交账号（经 Nitter RSS 抓取）。"
+        "记录竞品的实时发文、营销话术、与用户互动内容。"
+        "仅包含经验证的官方账号，用户讨论帖请见「reddit讨论」板块。"
+    ),
+    "reddit讨论": (
+        "来源：r/VPN、r/vpnreviews、r/nordvpn、r/ProtonVPN、r/UniUK 等多个社区。"
+        "重点关注：真实用户的购买决策、竞品抱怨、节点故障、流媒体解锁、"
+        "价格/退款、隐私信任、英国学生场景等高价值舆情信号。"
+    ),
+    "政策风险": (
+        "来源：GOV.UK、Ofcom、ICO（英国信息专员）、欧盟数字战略、CISA、FTC 等官方机构。"
+        "监控可能影响 VPN 行业的立法动态、监管公告、执法行动、数据保护法规更新。"
+        "媒体对政策的解读/报道放入「第三方网站」，本板块仅收录官方一手文件。"
+    ),
+    "第三方网站": (
+        "来源：TechRadar、Tom's Guide、Comparitech、VPNCompare（英国）、top10vpn、"
+        "BleepingComputer、Trustpilot、AirVPN论坛、Privacyguides 等。"
+        "涵盖媒体评测、SEO 排行、用户投诉、安全漏洞报道、行业报告。"
+        "Affiliate 属性较强的来源（vpnMentor 等）已排除，以保证信息客观性。"
+    ),
+}
+
 def fmt_dt(dt):
     if dt is None:
         return "时间不明"
@@ -823,11 +866,14 @@ def render_html(data):
         color  = CATEGORY_COLORS.get(cat, "#374151")
         icon   = CATEGORY_ICONS.get(cat, "•")
         count  = len(groups)
+        desc   = CATEGORY_DESC.get(cat, "")
 
         if groups:
             cards_html = "\n".join(render_group_card(g, cat) for g in groups)
         else:
             cards_html = '<div class="empty-section">暂无本时效窗口内的有效信息</div>'
+
+        desc_html = f'<p class="cat-desc">{desc}</p>' if desc else ""
 
         sections_html += f"""<section class="category-section" id="cat-{slug(cat)}">
   <div class="category-header" style="border-left-color:{color}">
@@ -835,6 +881,7 @@ def render_html(data):
     <h2 class="cat-title">{cat}</h2>
     <span class="cat-count" style="background:{color}">{count} 条</span>
   </div>
+  {desc_html}
   <div class="cards-container">{cards_html}</div>
 </section>
 """
@@ -885,9 +932,9 @@ def render_html(data):
         reddit_diag = f"""<details class="collapsed-section">
   <summary>🔍 Reddit 抓取诊断</summary>
   <div class="collapsed-content">
-    <p><b>OAuth配置状态：</b>{'已配置 ✅' if REDDIT_CLIENT_ID else '未配置（将使用兜底方式）'}</p>
+    <p><b>OAuth配置状态：</b>{'已配置 ✅（优先使用OAuth，更稳定）' if REDDIT_CLIENT_ID else '未配置 — 当前使用 RSS/old.reddit/JSON 等无需密钥的兜底方式（2026年起Reddit已大幅收紧自助API申请，未配置是常态，不代表故障）'}</p>
     {diag_items}
-    <p class="note">提升 Reddit 抓取成功率：在 GitHub → Settings → Secrets 中配置 REDDIT_CLIENT_ID、REDDIT_CLIENT_SECRET、REDDIT_USER_AGENT</p>
+    <p class="note">提升建议：若多个 subreddit 同时失败，优先检查 RSS（.rss）和 old.reddit 兜底是否被限流，而非纠结 OAuth；2026 年起 Reddit 自助创建 API App 门槛大幅提高，详见 REDDIT_提升指南.md</p>
   </div>
 </details>"""
 
@@ -957,6 +1004,9 @@ a:hover {{ text-decoration: underline; }}
 .cat-title {{ font-size: 1.05rem; font-weight: 700; flex: 1; }}
 .cat-count {{ font-size: 0.75rem; font-weight: 700; color: #fff;
              border-radius: 999px; padding: 2px 10px; }}
+.cat-desc {{ font-size: 0.78rem; color: var(--text3); line-height: 1.6;
+             padding: 6px 0 10px 26px; border-left: 1px solid var(--border);
+             margin: 0 0 10px 4px; }}
 .cards-container {{ display: flex; flex-direction: column; gap: 12px; }}
 .empty-section {{ color: var(--text3); font-size: 0.85rem;
                   padding: 16px; background: var(--surface); border-radius: 8px; }}

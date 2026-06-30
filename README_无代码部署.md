@@ -132,26 +132,15 @@ https://你的用户名.github.io/vpn-dashboard/
 
 ---
 
-## 配置 Reddit API（可选，提升 Reddit 抓取质量）
+## 关于 Reddit 抓取（重要说明）
 
-不配置 Reddit API 也能运行，但配置后 Reddit 抓取更稳定。
+**面板默认不依赖 Reddit OAuth API，无需任何配置即可抓取 Reddit 内容。**
 
-1. 前往 https://www.reddit.com/prefs/apps
-2. 点「Create App」或「Create Another App」
-3. 选「script」类型
-4. 填写名字（随意，例如 `vpn-dashboard`）
-5. redirect uri 填：`http://localhost`
-6. 创建后，记录：
-   - **client id**（显示在名字下面的短字符串）
-   - **secret**（点「edit」后可看到）
+脚本会自动用 RSS / old.reddit 等免密钥方式抓取，这是 2026 年最稳定的方式
+（Reddit 已大幅收紧自助 API 申请，详见 `REDDIT_提升指南.md`）。
 
-然后在 GitHub 仓库：
-
-1. Settings → Secrets and variables → Actions
-2. 点「New repository secret」，分别添加：
-   - `REDDIT_CLIENT_ID`：填你的 client id
-   - `REDDIT_CLIENT_SECRET`：填你的 secret
-   - `REDDIT_USER_AGENT`：填 `vpn-dashboard/1.0 by /u/你的Reddit用户名`
+如果你想尝试额外配置 OAuth（非必须，少数情况能进一步提升稳定性），
+完整说明和最新注意事项见项目根目录的 `REDDIT_提升指南.md`。
 
 ---
 
