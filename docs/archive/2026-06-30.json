@@ -1,7 +1,7 @@
 {
   "stats": {
-    "run_time_sgt": "2026-06-30 11:03 SGT",
-    "run_time_iso": "2026-06-30T11:03:55.056034+08:00",
+    "run_time_sgt": "2026-06-30 11:53 SGT",
+    "run_time_iso": "2026-06-30T11:53:14.513192+08:00",
     "timezone": "Asia/Singapore (SGT, UTC+8)",
     "lookback_hours": 48,
     "grace_hours": 12,
@@ -18,6 +18,13 @@
       "reddit讨论": 0,
       "政策风险": 0,
       "第三方网站": 0
+    },
+    "category_deltas": {
+      "竞品动态": null,
+      "社交媒体": null,
+      "reddit讨论": null,
+      "政策风险": null,
+      "第三方网站": null
     }
   },
   "categories": {

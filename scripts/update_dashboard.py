@@ -31,6 +31,11 @@ REDDIT_CLIENT_ID     = os.environ.get("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT    = os.environ.get("REDDIT_USER_AGENT", "vpn-dashboard-bot/1.0 (by /u/vpndashbot)")
 
+# Optional: enables AI-synthesized "今日要点" summaries per category.
+# Without this key, a rule-based keyword/top-story fallback is used instead —
+# the dashboard works either way, this just makes the synthesis smarter.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 REQUEST_TIMEOUT = 15
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -144,10 +149,21 @@ def clean_text(t):
     return t[:500]
 
 def title_fingerprint(title):
-    """Reduce title to key tokens for deduplication."""
-    title = re.sub(r'[^\w\s]', '', title.lower())
-    words = [w for w in title.split() if len(w) > 3]
-    return frozenset(words[:10])
+    """Reduce title to key tokens for deduplication.
+    Handles both space-separated (English) and CJK (Chinese) text —
+    CJK text has no whitespace between words, so word-splitting alone
+    would make every Chinese title a single unmatched token."""
+    title = title.lower()
+    has_cjk = bool(re.search(r'[\u4e00-\u9fff]', title))
+    if has_cjk:
+        # character bigrams over CJK + alnum runs
+        cleaned = re.sub(r'[^\u4e00-\u9fff\w]', '', title)
+        bigrams = {cleaned[i:i+2] for i in range(len(cleaned) - 1)}
+        return frozenset(list(bigrams)[:20])
+    else:
+        title = re.sub(r'[^\w\s]', '', title)
+        words = [w for w in title.split() if len(w) > 3]
+        return frozenset(words[:10])
 
 # ─────────────────────────────────────────────
 # DATA STRUCTURES
@@ -657,8 +673,117 @@ def deduplicate_and_merge(articles: list[Article]):
     return groups
 
 # ─────────────────────────────────────────────
-# MAIN PIPELINE
+# IMPORTANCE SCORING
 # ─────────────────────────────────────────────
+
+def importance_score(group):
+    """
+    Data-ops style prioritization:信号被多个独立来源印证 比 单源信息更重要，
+    同时新鲜度也加分。score 用于组内排序，让真正值得看的内容排在最前面。
+    """
+    src_count = len(group["sources"])
+    latest    = group["latest_dt"]
+    recency_bonus = 0.0
+    if latest:
+        hours_ago = (now_sgt() - latest).total_seconds() / 3600
+        recency_bonus = max(0.0, 24 - hours_ago) / 24 * 3  # up to +3 for very fresh
+    return src_count * 4 + recency_bonus
+
+# ─────────────────────────────────────────────
+# KEYWORD EXTRACTION (rule-based fallback)
+# ─────────────────────────────────────────────
+
+STOPWORDS = set("""
+the a an and or but if then else for of to in on at by with from as is are was were
+be been being this that these those it its they them their there here what which who
+whom how why when where not no nor so than too very can will would should could may
+might must shall do does did have has had you your we our i my he she his her vpn
+about into over under again further once more most other some such only own same
+""".split())
+
+def extract_keywords(groups, top_n=8):
+    counter = defaultdict(int)
+    for g in groups:
+        text = (g["title"] + " " + (g["summary"] or "")).lower()
+        words = re.findall(r"[a-z][a-z\-]{2,}", text)
+        for w in words:
+            if w not in STOPWORDS and len(w) > 3:
+                counter[w] += 1
+    ranked = sorted(counter.items(), key=lambda x: x[1], reverse=True)
+    return [w for w, _ in ranked[:top_n] if _ >= 2] or [w for w, _ in ranked[:top_n]]
+
+# ─────────────────────────────────────────────
+# CATEGORY HIGHLIGHTS — AI synthesis with rule-based fallback
+# ─────────────────────────────────────────────
+
+def generate_ai_highlights(cat, groups):
+    """Call Anthropic API to synthesize what's actually being discussed.
+    Returns list[str] (bullets) or None on any failure (caller falls back)."""
+    if not ANTHROPIC_API_KEY or not groups:
+        return None
+    try:
+        top = sorted(groups, key=importance_score, reverse=True)[:15]
+        payload_items = [
+            {
+                "title": g["title"][:120],
+                "summary": (g["summary"] or "")[:200],
+                "source_count": len(g["sources"]),
+            }
+            for g in top
+        ]
+        prompt = (
+            f"以下是「{cat}」类别下，过去时效窗口内抓取到的 VPN 行业信息条目（JSON数组，"
+            f"source_count 表示有多少独立来源报道了同一件事，数值越高说明信号越强）：\n\n"
+            f"{json.dumps(payload_items, ensure_ascii=False)}\n\n"
+            "请用中文写出 3-5 条「今日要点」，每条不超过35字，帮助阅读者快速抓住"
+            "本类别用户/媒体/官方在讨论什么、有什么共性趋势或异常信号。"
+            "只做客观信息归纳，不要给出运营建议、增长建议或下一步行动。"
+            "直接输出要点列表，每行一条，不要编号前缀、不要多余说明文字。"
+        )
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 400,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        text = "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+        bullets = [ln.strip("•-* 　").strip() for ln in text.strip().split("\n") if ln.strip()]
+        return bullets[:5] if bullets else None
+    except Exception as e:
+        log.warning(f"AI highlight generation failed for {cat}: {e}")
+        return None
+
+def generate_rule_based_highlights(cat, groups):
+    """No-AI fallback: surface the top stories by importance + frequent keywords."""
+    if not groups:
+        return ["本时效窗口内暂无该类别有效信息"]
+    top = sorted(groups, key=importance_score, reverse=True)[:3]
+    bullets = []
+    for g in top:
+        src_n = len(g["sources"])
+        tag = f"（{src_n}个来源印证）" if src_n > 1 else ""
+        bullets.append(f"{g['title'][:50]}{tag}")
+    keywords = extract_keywords(groups)
+    if keywords:
+        bullets.append("高频关键词：" + "、".join(keywords[:6]))
+    return bullets
+
+def generate_category_highlights(cat, groups):
+    ai_result = generate_ai_highlights(cat, groups)
+    if ai_result:
+        return ai_result, "AI"
+    return generate_rule_based_highlights(cat, groups), "规则"
+
+
 
 def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWORK):
     run_start = now_sgt()
@@ -718,13 +843,37 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
     for cat in CATEGORY_ORDER:
         cat_articles = [a for a in in_window if a.category == cat]
         groups = deduplicate_and_merge(cat_articles)
-        # Sort by latest_dt desc
-        groups.sort(key=lambda g: g["latest_dt"] or datetime.min.replace(tzinfo=UTC), reverse=True)
+        # Sort by importance: multi-source-confirmed + fresher items surface first
+        groups.sort(key=importance_score, reverse=True)
         cat_groups[cat] = groups
+
+    # Generate per-category highlight summaries ("今日要点")
+    cat_highlights = {}
+    cat_highlight_method = {}
+    for cat in CATEGORY_ORDER:
+        bullets, method = generate_category_highlights(cat, cat_groups[cat])
+        cat_highlights[cat] = bullets
+        cat_highlight_method[cat] = method
 
     # Failed sources
     failed_sources = [fr for fr in fetch_results if not fr.success]
     success_sources = [fr for fr in fetch_results if fr.success]
+
+    category_counts = {cat: len(cat_groups[cat]) for cat in CATEGORY_ORDER}
+
+    # Day-over-day delta vs yesterday's archive (data-ops style trend indicator)
+    category_deltas = {cat: None for cat in CATEGORY_ORDER}
+    try:
+        yesterday = (run_start - timedelta(days=1)).strftime("%Y-%m-%d")
+        prev_path = DIRS["archive"] / f"{yesterday}.json"
+        if prev_path.exists():
+            prev_data = json.loads(prev_path.read_text(encoding="utf-8"))
+            prev_counts = prev_data.get("stats", {}).get("category_counts", {})
+            for cat in CATEGORY_ORDER:
+                if cat in prev_counts:
+                    category_deltas[cat] = category_counts[cat] - prev_counts[cat]
+    except Exception as e:
+        log.warning(f"Could not compute day-over-day delta: {e}")
 
     # Stats
     stats = {
@@ -740,12 +889,15 @@ def run_pipeline(lookback_hours=DEFAULT_LOOKBACK_HOURS, skip_network=SKIP_NETWOR
         "in_window": len(in_window),
         "no_time": len(no_time),
         "too_old": len(too_old),
-        "category_counts": {cat: len(cat_groups[cat]) for cat in CATEGORY_ORDER},
+        "category_counts": category_counts,
+        "category_deltas": category_deltas,
     }
 
     return {
         "stats": stats,
         "cat_groups": cat_groups,
+        "cat_highlights": cat_highlights,
+        "cat_highlight_method": cat_highlight_method,
         "failed_sources": failed_sources,
         "no_time_articles": no_time,
         "too_old_articles": too_old,
@@ -828,12 +980,19 @@ def render_group_card(group, cat):
 
     time_range = earliest if earliest == latest else f"{earliest} → {latest}"
 
+    if src_count >= 3:
+        signal_badge = '<span class="signal-badge signal-strong">🔥 多源印证</span>'
+    elif src_count == 2:
+        signal_badge = '<span class="signal-badge signal-medium">📎 2个来源</span>'
+    else:
+        signal_badge = ''
+
     return f"""<div class="info-card" style="border-left-color:{color}">
   <div class="card-header">
     <h3 class="card-title">{group['title']}</h3>
     <div class="card-meta">
       <span class="time-badge">{age}</span>
-      {'<span class="multi-source-badge">📎 ' + str(src_count) + ' 个来源</span>' if src_count > 1 else ''}
+      {signal_badge}
     </div>
   </div>
   {f'<p class="card-summary">{group["summary"]}</p>' if group["summary"] else ''}
@@ -844,20 +1003,97 @@ def render_group_card(group, cat):
   </details>
 </div>"""
 
-def render_html(data):
+def render_history_nav(mode="index", current_date=""):
+    """
+    Date-filter widget. 'mode'='index' lives on docs/index.html (links into
+    archive/), 'mode'='archive' lives on docs/archive/{date}.html (links back
+    to ../index.html and sideways to other archive/{date}.html files).
+    Reads docs/archive/manifest.json client-side — no server needed, works
+    on static GitHub Pages.
+    """
+    if mode == "archive":
+        manifest_path = "manifest.json"
+        nav_prefix    = ""
+        back_link     = '<a href="../index.html" class="history-btn history-btn-secondary">↩ 返回今日最新</a>'
+    else:
+        manifest_path = "archive/manifest.json"
+        nav_prefix    = "archive/"
+        back_link     = ""
+
+    return f"""<div class="history-nav">
+  <span class="history-label">📅 历史数据查询</span>
+  <select id="historyDateSelect" class="history-select">
+    <option value="">加载中…</option>
+  </select>
+  <button id="historyGoBtn" class="history-btn" type="button">查看</button>
+  {back_link}
+</div>
+<script>
+(function() {{
+  var manifestUrl = "{manifest_path}";
+  var navPrefix   = "{nav_prefix}";
+  var currentDate = "{current_date}";
+  var sel = document.getElementById('historyDateSelect');
+  var btn = document.getElementById('historyGoBtn');
+
+  fetch(manifestUrl).then(function(r) {{
+    if (!r.ok) throw new Error('no manifest');
+    return r.json();
+  }}).then(function(data) {{
+    sel.innerHTML = '';
+    if (!data || !data.length) {{
+      sel.innerHTML = '<option value="">暂无历史归档</option>';
+      return;
+    }}
+    data.forEach(function(item) {{
+      var opt = document.createElement('option');
+      opt.value = item.date;
+      var label = item.date + '（共' + item.total + '条）';
+      if (item.date === currentDate) label += ' · 当前';
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }});
+    if (currentDate) {{
+      sel.value = currentDate;
+    }}
+  }}).catch(function(e) {{
+    sel.innerHTML = '<option value="">暂无历史归档（首次运行后将自动生成）</option>';
+  }});
+
+  btn.addEventListener('click', function() {{
+    var d = sel.value;
+    if (!d) return;
+    window.location.href = navPrefix + d + '.html';
+  }});
+}})();
+</script>"""
+
+def render_html(data, mode="index", current_date=""):
     stats     = data["stats"]
     cat_groups = data["cat_groups"]
+    cat_highlights = data["cat_highlights"]
+    cat_highlight_method = data["cat_highlight_method"]
     failed    = data["failed_sources"]
     no_time   = data["no_time_articles"]
     too_old   = data["too_old_articles"]
+    deltas    = stats.get("category_deltas", {})
 
-    # Category overview chips
+    # Category overview chips (with day-over-day delta)
     overview_html = ""
     for cat in CATEGORY_ORDER:
         count = stats["category_counts"].get(cat, 0)
         color = CATEGORY_COLORS.get(cat, "#374151")
         icon  = CATEGORY_ICONS.get(cat, "•")
-        overview_html += f'<div class="overview-chip" style="border-color:{color}"><span class="chip-icon">{icon}</span><span class="chip-label">{cat}</span><span class="chip-count" style="background:{color}">{count}</span></div>\n'
+        delta = deltas.get(cat)
+        if delta is None:
+            delta_html = ""
+        elif delta > 0:
+            delta_html = f'<span class="chip-delta delta-up">▲{delta}</span>'
+        elif delta < 0:
+            delta_html = f'<span class="chip-delta delta-down">▼{abs(delta)}</span>'
+        else:
+            delta_html = '<span class="chip-delta delta-flat">—</span>'
+        overview_html += f'<a href="#cat-{slug(cat)}" class="overview-chip" style="border-color:{color}"><span class="chip-icon">{icon}</span><span class="chip-label">{cat}</span><span class="chip-count" style="background:{color}">{count}</span>{delta_html}</a>\n'
 
     # Main sections
     sections_html = ""
@@ -867,6 +1103,8 @@ def render_html(data):
         icon   = CATEGORY_ICONS.get(cat, "•")
         count  = len(groups)
         desc   = CATEGORY_DESC.get(cat, "")
+        highlights = cat_highlights.get(cat, [])
+        h_method   = cat_highlight_method.get(cat, "规则")
 
         if groups:
             cards_html = "\n".join(render_group_card(g, cat) for g in groups)
@@ -875,6 +1113,20 @@ def render_html(data):
 
         desc_html = f'<p class="cat-desc">{desc}</p>' if desc else ""
 
+        # "今日要点" synthesis box
+        highlight_items = "".join(f'<li>{h}</li>' for h in highlights)
+        method_tag = "🤖 AI摘要" if h_method == "AI" else "📊 关键词/要点提取"
+        highlight_html = f"""<div class="highlight-box" style="border-color:{color}">
+    <div class="highlight-header">
+      <span class="highlight-title">💡 今日要点</span>
+      <span class="highlight-method">{method_tag}</span>
+    </div>
+    <ul class="highlight-list">{highlight_items}</ul>
+  </div>""" if highlights else ""
+
+        # Scrollable container only kicks in visually past ~4 cards (CSS max-height handles it)
+        scroll_class = "cards-container scrollable" if count > 4 else "cards-container"
+
         sections_html += f"""<section class="category-section" id="cat-{slug(cat)}">
   <div class="category-header" style="border-left-color:{color}">
     <span class="cat-icon">{icon}</span>
@@ -882,7 +1134,8 @@ def render_html(data):
     <span class="cat-count" style="background:{color}">{count} 条</span>
   </div>
   {desc_html}
-  <div class="cards-container">{cards_html}</div>
+  {highlight_html}
+  <div class="{scroll_class}">{cards_html}</div>
 </section>
 """
 
@@ -941,6 +1194,7 @@ def render_html(data):
     run_time   = stats["run_time_sgt"]
     total_win  = stats["in_window"]
     window_str = f"最近 {stats['lookback_hours']}h（+{stats['grace_hours']}h 时区宽限）"
+    history_nav_html = render_history_nav(mode=mode, current_date=current_date)
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -981,21 +1235,46 @@ a:hover {{ text-decoration: underline; }}
 .meta-label {{ font-size: 0.7rem; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; }}
 .meta-value {{ font-size: 0.9rem; font-weight: 600; color: var(--text); margin-top: 2px; }}
 
+/* History date-filter nav */
+.history-nav {{
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 14px; margin-bottom: 20px;
+}}
+.history-label {{ font-size: 0.82rem; color: var(--text2); font-weight: 600; white-space: nowrap; }}
+.history-select {{
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 10px; font-size: 0.82rem; flex: 1; min-width: 160px;
+  max-width: 320px;
+}}
+.history-btn {{
+  background: var(--accent); color: #0f172a; border: none; border-radius: 6px;
+  padding: 6px 14px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+  text-decoration: none; display: inline-flex; align-items: center;
+}}
+.history-btn:hover {{ opacity: 0.85; }}
+.history-btn-secondary {{ background: var(--surface2); color: var(--text2); }}
+
 /* Overview chips */
 .overview {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }}
 .overview-chip {{
   display: flex; align-items: center; gap: 8px;
   background: var(--surface); border: 1.5px solid; border-radius: 999px;
   padding: 6px 14px; cursor: pointer; transition: background .15s;
+  text-decoration: none; color: inherit;
 }}
 .overview-chip:hover {{ background: var(--surface2); }}
 .chip-icon {{ font-size: 1rem; }}
 .chip-label {{ font-size: 0.82rem; color: var(--text2); }}
 .chip-count {{ font-size: 0.75rem; font-weight: 700; color: #fff;
               border-radius: 999px; padding: 1px 7px; }}
+.chip-delta {{ font-size: 0.7rem; font-weight: 700; border-radius: 4px; padding: 1px 5px; }}
+.delta-up {{ background: #14532d; color: #4ade80; }}
+.delta-down {{ background: #450a0a; color: #f87171; }}
+.delta-flat {{ background: var(--surface2); color: var(--text3); }}
 
 /* Category sections */
-.category-section {{ margin-bottom: 32px; }}
+.category-section {{ margin-bottom: 32px; scroll-margin-top: 16px; }}
 .category-header {{
   display: flex; align-items: center; gap: 10px;
   border-left: 4px solid; padding-left: 12px; margin-bottom: 14px;
@@ -1007,7 +1286,37 @@ a:hover {{ text-decoration: underline; }}
 .cat-desc {{ font-size: 0.78rem; color: var(--text3); line-height: 1.6;
              padding: 6px 0 10px 26px; border-left: 1px solid var(--border);
              margin: 0 0 10px 4px; }}
+
+/* Highlight box — "今日要点" synthesis */
+.highlight-box {{
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border); border-left: 3px solid;
+  border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+}}
+.highlight-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
+.highlight-title {{ font-size: 0.85rem; font-weight: 700; color: var(--text); }}
+.highlight-method {{ font-size: 0.68rem; color: var(--text3); background: var(--bg);
+                     border-radius: 4px; padding: 2px 6px; }}
+.highlight-list {{ list-style: none; display: flex; flex-direction: column; gap: 6px; }}
+.highlight-list li {{
+  font-size: 0.83rem; color: var(--text2); line-height: 1.5; padding-left: 14px;
+  position: relative;
+}}
+.highlight-list li::before {{ content: "▸"; position: absolute; left: 0; color: var(--accent); }}
+
 .cards-container {{ display: flex; flex-direction: column; gap: 12px; }}
+
+/* Scrollable card containers — keeps the page from becoming an endless list */
+.cards-container.scrollable {{
+  max-height: 560px; overflow-y: auto; padding-right: 6px;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  position: relative;
+}}
+.cards-container.scrollable::-webkit-scrollbar {{ width: 6px; }}
+.cards-container.scrollable::-webkit-scrollbar-thumb {{
+  background: var(--border); border-radius: 3px;
+}}
+.cards-container.scrollable::-webkit-scrollbar-track {{ background: transparent; }}
 .empty-section {{ color: var(--text3); font-size: 0.85rem;
                   padding: 16px; background: var(--surface); border-radius: 8px; }}
 
@@ -1029,6 +1338,9 @@ a:hover {{ text-decoration: underline; }}
   font-size: 0.72rem; background: #1e3a5f; color: #7dd3fc;
   border-radius: 4px; padding: 2px 7px;
 }}
+.signal-badge {{ font-size: 0.72rem; border-radius: 4px; padding: 2px 7px; font-weight: 600; }}
+.signal-strong {{ background: #451a03; color: #fb923c; }}
+.signal-medium {{ background: #1e3a5f; color: #7dd3fc; }}
 .card-summary {{ font-size: 0.83rem; color: var(--text2); margin-bottom: 8px; }}
 .card-time {{ font-size: 0.75rem; color: var(--text3); margin-bottom: 8px; }}
 
@@ -1098,6 +1410,9 @@ a:hover {{ text-decoration: underline; }}
   </div>
 </div>
 
+<!-- HISTORY NAV -->
+{history_nav_html}
+
 <!-- OVERVIEW -->
 <div class="overview">
 {overview_html}
@@ -1125,17 +1440,42 @@ a:hover {{ text-decoration: underline; }}
 # SAVE OUTPUTS
 # ─────────────────────────────────────────────
 
+def build_archive_manifest():
+    """Scan docs/archive/*.json (skip manifest.json itself) and build a
+    lightweight index the client-side date-filter widget can fetch."""
+    items = []
+    for jf in DIRS["archive"].glob("*.json"):
+        if jf.name == "manifest.json":
+            continue
+        date_str = jf.stem  # filename like 2026-06-30.json -> 2026-06-30
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            continue
+        try:
+            payload = json.loads(jf.read_text(encoding="utf-8"))
+            total = payload.get("stats", {}).get("in_window", 0)
+        except Exception:
+            total = 0
+        items.append({"date": date_str, "total": total})
+
+    items.sort(key=lambda x: x["date"], reverse=True)
+    manifest_path = DIRS["archive"] / "manifest.json"
+    manifest_path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    log.info(f"Archive manifest written: {manifest_path} ({len(items)} dates)")
+    return items
+
 def save_outputs(data):
     for d in DIRS.values():
         d.mkdir(parents=True, exist_ok=True)
 
-    # HTML
-    html = render_html(data)
-    html_path = DIRS["docs"] / "index.html"
-    html_path.write_text(html, encoding="utf-8")
-    log.info(f"HTML written: {html_path}")
+    date_str = data["stats"]["run_time_sgt"][:10]
 
-    # JSON
+    # docs/index.html — the "live" page, links forward into archive/
+    index_html = render_html(data, mode="index", current_date=date_str)
+    index_path = DIRS["docs"] / "index.html"
+    index_path.write_text(index_html, encoding="utf-8")
+    log.info(f"HTML written: {index_path}")
+
+    # JSON (latest snapshot)
     stats = data["stats"]
     json_data = {
         "stats": stats,
@@ -1158,13 +1498,18 @@ def save_outputs(data):
     json_path.write_text(json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info(f"JSON written: {json_path}")
 
-    # Archive
-    date_str = data["stats"]["run_time_sgt"][:10]
+    # Archive — a standalone snapshot page for THIS date, with nav adjusted
+    # for its location (docs/archive/{date}.html), so it can link back to
+    # ../index.html and sideways to other dates via the same manifest.
+    archive_html_content = render_html(data, mode="archive", current_date=date_str)
     archive_html = DIRS["archive"] / f"{date_str}.html"
-    archive_html.write_text(html, encoding="utf-8")
+    archive_html.write_text(archive_html_content, encoding="utf-8")
     archive_json = DIRS["archive"] / f"{date_str}.json"
     archive_json.write_text(json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info(f"Archive written: {archive_html}")
+
+    # Rebuild the manifest so the date-filter dropdown picks up today's entry
+    build_archive_manifest()
 
 # ─────────────────────────────────────────────
 # ENTRY POINT

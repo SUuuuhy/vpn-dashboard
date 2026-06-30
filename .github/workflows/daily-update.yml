@@ -88,6 +88,7 @@ jobs:
           REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USER_AGENT:    ${{ secrets.REDDIT_USER_AGENT }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
           SKIP_NETWORK:         ${{ github.event.inputs.skip_network || 'false' }}
           LOOKBACK_HOURS:       ${{ github.event.inputs.lookback_hours || '48' }}
           TIMEZONE_GRACE_HOURS: '12'
